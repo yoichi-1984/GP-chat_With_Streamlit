@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gp-chat"
+version = "0.1.0"
+description = "GP-chat with Streamlit"
+authors = [
+    { name = "yoichi-1984", email = "yoichi.1984.engineer@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit",
+    "google-genai",
+    "python-dotenv",
+    "streamlit-ace",
+    "build",
+    "pylint",
+    "pyyaml",
+    "python-docx"
+]
+
+[project.scripts]
+gp-chat = "gp_chat.main_runner:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+gp_chat = ["*.yaml"]

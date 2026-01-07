@@ -1,0 +1,87 @@
+file_uploader:
+  supported_extensions:
+  # Python
+  - '.py'
+  - '.pyi'
+  # C/C++
+  - '.c'
+  - '.h'
+  - '.cpp'
+  - '.cc'
+  - '.cxx'
+  - '.hpp'
+  - '.hxx'
+  # C# / .NET / VB
+  - '.cs'
+  - '.vb' # 追加
+  - '.vbproj' # 追加 (VB.NETプロジェクトファイル)
+  - '.csproj'
+  - '.sln' # 追加 (ソリューションファイル)
+  - '.config' # 追加 (設定ファイル)
+  - '.resx' # 追加 (リソースファイル)
+  - '.myapp' # 追加 (My Applicationファイル)
+  - '.settings' # 追加 (設定ファイル)
+  - '.manifest' # 追加 (マニフェストファイル)
+  - '.licx' # 追加 (ライセンスファイル)
+  # Java
+  - '.java'
+  - '.jsp'
+  - '.tag'
+  # JavaScript/TypeScript
+  - '.js'
+  - '.mjs'
+  - '.cjs'
+  - '.jsx'
+  - '.tsx'
+  - '.ts'
+  # R
+  - '.r'
+  - '.R'
+  - '.rmd'
+  # Rust
+  - '.rs'
+  # VBA
+  - '.bas'
+  - '.cls'
+  - '.frm'
+  # Web (HTML/CSS)
+  - '.html'
+  - '.htm'
+  - '.css'
+  - '.scss'
+  - '.sass'
+  - '.less'
+  # マークアップ/ドキュメント
+  - '.md'
+  - '.markdown'
+  - '.xml' # 追加 (XMLファイル)
+  # 設定/データ形式
+  - '.json'
+  - '.yml'
+  - '.yaml'
+  - '.toml'
+  - '.ini'
+  - '.cfg'
+  - '.conf'
+  - '.csv' # 追加 (CSVデータファイル)
+  # スクリプト言語
+  - '.sh'
+  - '.bash'
+  - '.ps1' # 追加 (PowerShellスクリプト)
+  - '.bat' # 追加 (バッチファイル)
+  # その他
+  - '.txt' # 追加 (プレーンテキスト)
+  - 'Dockerfile'
+  - '.log'
+  - '.sql'
+  - '.gitignore'
+  - '.editorconfig'
+  - '.gitmodules'
+  - '.cmake'
+  - 'CMakeLists.txt'
+  - '.go'
+  - '.swift'
+  - '.kt'
+  - '.kts'
+  - '.ipynb'
+  - 'zip' 

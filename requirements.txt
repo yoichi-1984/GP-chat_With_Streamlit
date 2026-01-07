@@ -1,0 +1,7 @@
+streamlit
+google-genai
+python-dotenv
+streamlit-ace
+build
+pylint
+pyyaml
