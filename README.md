@@ -17,8 +17,9 @@ GP-Chat_With_Streamlit: Gemini対応AI汎用チャットアプリ
   
 `GP-Chat_With_Streamlit` は、  
 GeminiAPIに対応した汎用のチャットアプリケーションです。  
-に特化した専門家AIチャットボットです。  
-本アプリケーションは、従来のチャット形式の対話に加え、複数のコードブロック（Canvas）をコンテキストとしてAIに提供できる「マルチコード」機能を搭載しています。  
+本アプリケーションは、従来のチャット形式の対話に加え、PDF・画像・WORDファイルの添付機能と、  
+複数のコードブロック（Canvas）をコンテキストとしてAIに提供できる「マルチコード」機能を  
+搭載しています。  
   
 CLIラッパー (`main_runner.py`) は `streamlit run main.py` を自動で呼び出します。  
   
@@ -48,28 +49,7 @@ CLIラッパー (`main_runner.py`) は `streamlit run main.py` を自動で呼�
  └── CHANGELOG.md  
   
 ---  
-## インストール例  
-    
-```bash  
-git clone https://github.com/ユーザ名/GP-chat.git  
-python3 -m venv .env  
-source .env/bin/activate   
-python.exe -m pip install --upgrade pip setuptools  
-pip install -e .  
-```  
-もしくは
-```bash  
-git clone https://github.com/ユーザ名/GP-chat.git  
-python3 -m venv .env  
-source .env/bin/activate   
-pip install build
-python -m build
-```  
-　*dist/にあるwheelファイルを仮想環境直下に移動*
-install.batを実行
-
----  
-## 環境設定-1  
+## 環境設定  
   
 google cloudにアクセスし、画面左上部からプロジェクト選択ボタン押し、  
 該当のプロジェクトID（最右列）をメモ(後述のGCP_PROJECT_ID)。  
@@ -95,7 +75,10 @@ GEMINI_MODEL_ID="gemini-3-pro-preview"
 GOOGLE_APPLICATION_CREDENTIALS="C:/xxxxx/gen-lang-client-xxxx-xxxx.json"  
   
 ---  
-## 使い方    
+## 事前準備    
+  
+以下に記載の方法でPython仮想環境を構築  
+https://note.com/yoichi_1984xx/n/n3c95602b011c  
   
 pyproject.tomlに従ってインストール。  
 pip install -e .  
