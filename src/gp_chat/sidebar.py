@@ -8,26 +8,21 @@ from . import config
 def render_sidebar(supported_types, env_files, load_history, handle_clear, handle_review, handle_validation, handle_file_upload):
     """Renders the sidebar with Gemini 3 specific options and model selector."""
     with st.sidebar:
+        # --- 1. AIモデル選択エリア ---
         st.header("AIモデル選択")
         
-        def on_env_change():
-            # Reset conversation but keep settings
-            for key, value in config.SESSION_STATE_DEFAULTS.items():
-                if key in ['reasoning_effort', 'canvas_key_counter', 'current_model_id', 'enable_google_search', 'uploaded_file_queue']:
-                    continue
-                st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
-            st.session_state['canvas_key_counter'] += 1
-
+        # .env変更時の自動リセットロジックを削除しました
+        # 環境が変わっても会話履歴は保持されます
+        
         st.selectbox(
             label="Environment (.env)",
             options=env_files,
             format_func=lambda x: os.path.basename(x),
             key='selected_env_file',
-            on_change=on_env_change,
+            # on_changeコールバックを削除
             disabled=st.session_state.get('is_generating', False)
         )
 
-        # モデルを直接UIから選択できるように追加
         st.selectbox(
             label="Target Model",
             options=config.AVAILABLE_MODELS,
@@ -42,59 +37,15 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             help="high: Maximum reasoning depth. low: Faster response."
         )
 
-        # Web検索 (Grounding) チェックボックス
         st.checkbox(
             label=config.UITexts.WEB_SEARCH_LABEL,
             key='enable_google_search',
             help=config.UITexts.WEB_SEARCH_HELP
         )
         
-        # --- ファイル取り込み機能 ---
-        st.divider()
-        st.header(config.UITexts.FILE_UPLOAD_HEADER)
-        
-        # キューの初期化（未定義の場合の安全策）
-        if 'uploaded_file_queue' not in st.session_state:
-            st.session_state['uploaded_file_queue'] = []
-
-        # ファイルアップローダーのリセット用キー管理
-        if "file_uploader_key" not in st.session_state:
-            st.session_state["file_uploader_key"] = 0
-            
-        uploader_key = f"file_uploader_{st.session_state['file_uploader_key']}"
-
-        # 許可する拡張子をここで明示的に定義（Configの更新漏れ対策）
-        # PDF, Word, 画像, テキスト各種を許可
-        ALLOWED_EXTENSIONS = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "txt", "md", "py", "js", "json", "csv"]
-
-        # アップローダーの表示 (コールバックは廃止し、直接同期する)
-        uploaded_files = st.file_uploader(
-            label=config.UITexts.FILE_UPLOAD_LABEL,
-            type=ALLOWED_EXTENSIONS,
-            accept_multiple_files=True,
-            help=config.UITexts.FILE_UPLOAD_HELP,
-            key=uploader_key
-        )
-        
-        # --- DEBUG: サイドバーでのファイル認識状態 ---
-        if uploaded_files:
-            st.sidebar.markdown("--- 🛠 DEBUG INFO ---")
-            st.sidebar.text(f"Widget Files: {len(uploaded_files)}")
-            for f in uploaded_files:
-                st.sidebar.text(f"- {f.name} ({f.size}B)")
-        # ----------------------------------------
-        
-        # セッションステートへの同期（シンプルかつ確実に）
-        if uploaded_files:
-            st.session_state['uploaded_file_queue'] = uploaded_files
-            file_count = len(uploaded_files)
-            st.info(f"送信待ちファイル: {file_count} 件\nチャットを送信するとAIに渡されます。")
-        else:
-            st.session_state['uploaded_file_queue'] = []
-
-
         st.divider()
 
+        # --- 2. 設定・履歴エリア ---
         def handle_full_reset():
             for key, value in config.SESSION_STATE_DEFAULTS.items():
                 st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
@@ -124,8 +75,52 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
 
         history_uploader_key = f"history_uploader_{st.session_state['canvas_key_counter']}"
         st.file_uploader(label=config.UITexts.UPLOAD_HISTORY_LABEL, type="json", key=history_uploader_key, on_change=load_history, args=(history_uploader_key,))
+
+        st.divider()
+
+        # --- 3. ファイル添付エリア ---
+        st.header(config.UITexts.FILE_UPLOAD_HEADER)
         
-        # Editor (Canvas) Management
+        # キューの初期化（未定義の場合の安全策）
+        if 'uploaded_file_queue' not in st.session_state:
+            st.session_state['uploaded_file_queue'] = []
+
+        # ファイルアップローダーのリセット用キー管理
+        if "file_uploader_key" not in st.session_state:
+            st.session_state["file_uploader_key"] = 0
+            
+        uploader_key = f"file_uploader_{st.session_state['file_uploader_key']}"
+
+        # 許可する拡張子
+        # PPT, PPTXを追加しました
+        ALLOWED_EXTENSIONS = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md", "py", "js", "json", "csv"]
+
+        uploaded_files = st.file_uploader(
+            label=config.UITexts.FILE_UPLOAD_LABEL,
+            type=ALLOWED_EXTENSIONS,
+            accept_multiple_files=True,
+            help=config.UITexts.FILE_UPLOAD_HELP,
+            key=uploader_key
+        )
+        
+        # DEBUG info
+        if uploaded_files:
+            st.sidebar.markdown("--- 🛠 DEBUG INFO ---")
+            st.sidebar.text(f"Widget Files: {len(uploaded_files)}")
+            for f in uploaded_files:
+                st.sidebar.text(f"- {f.name} ({f.size}B)")
+        
+        # Sync to session state
+        if uploaded_files:
+            st.session_state['uploaded_file_queue'] = uploaded_files
+            file_count = len(uploaded_files)
+            st.info(f"送信待ちファイル: {file_count} 件\nチャットを送信するとAIに渡されます。")
+        else:
+            st.session_state['uploaded_file_queue'] = []
+
+        st.divider()
+
+        # --- 4. コードエディタ (Canvas) エリア ---
         st.subheader(config.UITexts.EDITOR_SUBHEADER)
         multi_code_enabled = st.checkbox(config.UITexts.MULTI_CODE_CHECKBOX, value=st.session_state['multi_code_enabled'])
         if multi_code_enabled != st.session_state['multi_code_enabled']:
@@ -171,3 +166,14 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             up_key = f"up_s_{st.session_state['canvas_key_counter']}"
             st.file_uploader("Load into Canvas", type=supported_types, key=up_key, on_change=handle_file_upload, args=(0, up_key))
             
+        st.markdown("---") # 区切り線
+        st.markdown(
+            """
+            <div style="text-align: center; font-size: 12px; color: #666;">
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat</a><br>
+                © yoichi-1984<br>
+                Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )

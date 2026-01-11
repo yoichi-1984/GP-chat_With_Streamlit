@@ -22,7 +22,7 @@ DEFAULT_SYSTEM_ROLE = """You are Gemini, a helpful and versatile AI assistant.
 Your capabilities include:
 1. **General Knowledge**: Answering questions on a wide range of topics.
 2. **Coding**: Writing, debugging, and explaining code in various languages.
-3. **Document Analysis**: Understanding and summarizing contents of PDFs, Word documents, and text files.
+3. **Document Analysis**: Understanding and summarizing contents of PDFs, Word documents, PowerPoint presentations, and text files.
 4. **Image Understanding**: Analyzing images and diagrams.
 
 Always respond in a helpful, polite, and accurate manner.
@@ -51,23 +51,20 @@ SESSION_STATE_DEFAULTS = {
 AVAILABLE_MODELS = [
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
-    "gemini-2.0-flash-001",
-    "gemini-1.5-pro-002",
-    "gemini-1.5-flash-002"
 ]
 
 # --- UI Texts ---
 class UITexts:
-    APP_TITLE = "🤖Codex-Chat & Omni-Assistant" # タイトルも汎用的に変更
+    APP_TITLE = "🤖GP-Chat 汎用AIアプリ with Gemini" # タイトルも汎用的に変更
     SIDEBAR_HEADER = "設定"
     RESET_BUTTON_LABEL = "会話履歴をリセット"
-    CODEX_MINI_INFO = "`Gemini 3 Pro` allows processing massive codebases and documents with its 1M context window."
+    CODEX_MINI_INFO = "`Gemini 3 は最大1Mまでのトークンを使用可能です` ."
     HISTORY_SUBHEADER = "会話履歴 (JSON)"
     DOWNLOAD_HISTORY_BUTTON = "会話履歴をダウンロード"
     UPLOAD_HISTORY_LABEL = "JSONで会話を再開"
-    HISTORY_LOADED_SUCCESS = "History and Canvases loaded."
-    OLD_HISTORY_FORMAT_WARNING = "Old format detected. Code could not be restored."
-    JSON_FORMAT_ERROR = "Unsupported JSON format."
+    HISTORY_LOADED_SUCCESS = "会話履歴とCanvasを読み込みました"
+    OLD_HISTORY_FORMAT_WARNING = "古いフォーマットなので対応していません"
+    JSON_FORMAT_ERROR = "対応できないJSON形式です"
     JSON_LOAD_ERROR = "JSON load error: {e}"
 
     EDITOR_SUBHEADER = "🔧 コードエディタ"
@@ -78,9 +75,11 @@ class UITexts:
     VALIDATE_BUTTON = "検証"
 
     FILE_UPLOAD_HEADER = "📂 ファイル添付"
-    FILE_UPLOAD_LABEL = "画像 / PDF / Word"
+    # PPT/PPTXを追加
+    FILE_UPLOAD_LABEL = "画像 / PDF / Word / PPT"
     FILE_UPLOAD_HELP = "チャット送信時にAIに読み込ませます。送信後にクリアされます。"
-    SUPPORTED_FILE_TYPES = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "txt", "md"]
+    # ppt, pptxを追加
+    SUPPORTED_FILE_TYPES = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md"]
 
     SYSTEM_PROMPT_HEADER = "Set AI System Role"
     SYSTEM_PROMPT_TEXT_AREA_LABEL = "System Role"

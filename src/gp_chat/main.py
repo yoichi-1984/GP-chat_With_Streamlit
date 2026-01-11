@@ -116,9 +116,9 @@ def run_chatbot_app():
 
     # システムプロンプト設定
     if not st.session_state['system_role_defined']:
-        st.subheader("AIの役割を設定")
+        st.subheader("AIの役割を設定（デフォルトでも、変更してもどちらでもOK）")
         role = st.text_area("System Role", value=PROMPTS.get("system", {}).get("text", ""), height=200)
-        if st.button("チャットを開始"):
+        if st.button("チャットを開始", type="primary"):
             st.session_state['messages'] = [{"role": "system", "content": role}]
             st.session_state['system_role_defined'] = True
             st.rerun()
@@ -161,10 +161,21 @@ def run_chatbot_app():
     # 生成ロジック
     if st.session_state['is_generating']:
         with st.chat_message("assistant"):
-            thought_container = st.container()
+            # --- 機能改善③: Thinking & Grounding Process 表示エリア ---
+            # 外枠をempty()で作っておき、中身がなければ後で消せるようにする
+            thought_area_container = st.empty()
+            with thought_area_container.container():
+                # ラベルを日本語化、かつデフォルトで折りたたむ(expanded=False)
+                thought_status = st.status("思考プロセス (Thinking Process)...", expanded=False)
+                thought_placeholder = thought_status.empty()
+            # -----------------------------------------------------
+
             text_placeholder = st.empty()
             full_response = ""
-            full_thought = ""
+            
+            # 思考ログ（Thoughtテキスト + 検索アクション）をまとめる文字列
+            full_thought_log = ""
+            
             usage_metadata = None 
             grounding_chunks = []
             
@@ -186,27 +197,16 @@ def run_chatbot_app():
                     system_instruction = m["content"]
                 else:
                     chat_contents.append(types.Content(role=m["role"], parts=[types.Part.from_text(text=m["content"])]))
-
+            
             # --- ファイル添付処理 (今回のターン) ---
             file_attachments_meta = []
             
             # --- DEBUG: 送信前のキュー確認 ---
             queue_files = st.session_state.get('uploaded_file_queue', [])
-            add_debug_log(f"[DEBUG] Queue in main loop: {len(queue_files)} files")
-            if queue_files:
-                with st.expander("🛠 [DEBUG] File Processing Info", expanded=True):
-                    st.write(f"Processing {len(queue_files)} files from queue...")
-                    for f in queue_files:
-                        st.write(f"- {f.name} ({f.type})")
-            # -------------------------------
-
+            
             if not is_special_mode and st.session_state.get('uploaded_file_queue'):
                 file_parts, file_meta = utils.process_uploaded_files_for_gemini(st.session_state['uploaded_file_queue'])
                 
-                # --- DEBUG: 変換結果の確認 ---
-                add_debug_log(f"[DEBUG] Generated {len(file_parts)} API parts")
-                # ---------------------------
-
                 if file_parts and chat_contents:
                     # ユーザーの最後のメッセージ（直前の入力）にパーツを追加
                     last_user_msg_content = chat_contents[-1]
@@ -244,7 +244,12 @@ def run_chatbot_app():
                     tools=tools_config
                 )
                 if "gemini-3" in model_id:
-                    gen_config.thinking_config = types.ThinkingConfig(thinking_level=t_level)
+                    # include_thoughts=True は維持
+                    gen_config.thinking_config = types.ThinkingConfig(
+                        thinking_level=t_level,
+                        include_thoughts=True
+                    )
+                    # add_debug_log(f"Thinking Config Enabled: {t_level}, include_thoughts=True")
 
                 stream = client.models.generate_content_stream(
                     model=model_id,
@@ -252,43 +257,78 @@ def run_chatbot_app():
                     config=gen_config
                 )
 
+                chunk_count = 0
                 for chunk in stream:
+                    chunk_count += 1
                     if chunk.usage_metadata:
                         usage_metadata = chunk.usage_metadata
                     
                     if not chunk.candidates: continue
                     
-                    # Grounding Metadataの収集
-                    if chunk.candidates[0].grounding_metadata:
-                        grounding_chunks.append(chunk.candidates[0].grounding_metadata)
+                    cand = chunk.candidates[0]
 
-                    for part in chunk.candidates[0].content.parts:
-                        if part.thought:
-                            full_thought += part.text
-                            thought_container.status("Thinking...", expanded=True).write(full_thought)
-                        elif part.text:
-                            full_response += part.text
-                            text_placeholder.markdown(full_response + "▌")
+                    # --- Grounding Metadata (検索アクション) の処理 ---
+                    if cand.grounding_metadata:
+                        grounding_chunks.append(cand.grounding_metadata)
+                        
+                        # 検索クエリがあれば、思考ログに追記して表示
+                        if cand.grounding_metadata.web_search_queries:
+                            queries = cand.grounding_metadata.web_search_queries
+                            add_debug_log(f"[Grounding] Queries detected: {queries}")
+                            for query in queries:
+                                # Action (Search) としてフォーマット
+                                action_text = f"\n\n🔍 **Action (Google Search):** `{query}`\n\n"
+                                full_thought_log += action_text
+                                thought_placeholder.markdown(full_thought_log)
+
+                    # --- Content Parts の処理 ---
+                    if cand.content and cand.content.parts:
+                        for part in cand.content.parts:
+                            is_thought = False
+                            thought_text = ""
+
+                            # パターン1: part.thought が文字列
+                            if hasattr(part, 'thought') and isinstance(part.thought, str) and part.thought:
+                                is_thought = True
+                                thought_text = part.thought
+                            
+                            # パターン2: part.thought が True
+                            elif hasattr(part, 'thought') and part.thought is True:
+                                is_thought = True
+                                thought_text = part.text
+
+                            if is_thought:
+                                if thought_text:
+                                    full_thought_log += thought_text
+                                    thought_placeholder.markdown(full_thought_log)
+                            
+                            # 思考でない場合は通常のテキストとして処理
+                            elif part.text:
+                                full_response += part.text
+                                text_placeholder.markdown(full_response + "▌")
                 
                 text_placeholder.markdown(full_response)
                 
-                # Grounding情報の統合と表示
+                # --- UI調整: 思考ログがない場合は枠ごと消す、あれば畳む ---
+                if not full_thought_log:
+                    thought_area_container.empty()
+                else:
+                    # 完了時のラベルも日本語化
+                    thought_status.update(label="思考完了 (Finished Thinking)", state="complete", expanded=False)
+                
+                # Grounding情報の統合と表示（最終的なまとめとして）
                 final_grounding_metadata = None
                 if grounding_chunks:
-                    # 最後のチャンクや集約した情報を使用（簡易的に最後のものを採用）
-                    # 実際のGrounding MetadataはWebSearchQueryやSourceなどが含まれる
                     last_meta = grounding_chunks[-1]
                     
-                    # シリアライズ可能な形式に変換
                     final_grounding_metadata = {}
                     if last_meta.grounding_chunks:
-                         # 検索結果（Source）の抽出
-                        sources = []
-                        for gc in last_meta.grounding_chunks:
-                            if gc.web:
-                                sources.append({"title": gc.web.title, "uri": gc.web.uri})
-                        if sources:
-                            final_grounding_metadata["sources"] = sources
+                         sources = []
+                         for gc in last_meta.grounding_chunks:
+                             if gc.web:
+                                 sources.append({"title": gc.web.title, "uri": gc.web.uri})
+                         if sources:
+                             final_grounding_metadata["sources"] = sources
                             
                     if last_meta.web_search_queries:
                         final_grounding_metadata["queries"] = last_meta.web_search_queries
