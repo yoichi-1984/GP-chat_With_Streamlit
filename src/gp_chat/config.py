@@ -15,7 +15,7 @@ ACE_EDITOR_SETTINGS = {
     "show_gutter": True,
     "wrap": True,
 }
-ACE_EDITOR_DEFAULT_CODE = "# Code goes here\n"
+ACE_EDITOR_DEFAULT_CODE = "# コードはここに \n"
 
 # --- System Prompts ---
 # コーディング特化ではなく、汎用的な役割定義に変更
