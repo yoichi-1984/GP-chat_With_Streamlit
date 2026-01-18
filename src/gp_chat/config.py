@@ -1,3 +1,4 @@
+# config.py:
 # --- Constants ---
 MAX_CANVASES = 20
 

@@ -1,3 +1,4 @@
+# sidebar.py: 
 import streamlit as st
 import os
 import json
@@ -47,9 +48,25 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
 
         # --- 2. 設定・履歴エリア ---
         def handle_full_reset():
+            # 保持したい設定キーを定義 (.envのみ)
+            keys_to_keep = ['selected_env_file']
+
+            # デフォルト値のリセットループ
             for key, value in config.SESSION_STATE_DEFAULTS.items():
+                # 保持対象キーはスキップ
+                if key in keys_to_keep:
+                    continue
+                # それ以外はデフォルト値で上書き (モデルやThinking Levelもリセットされる)
                 st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
+            
+            # ウィジェットのIDカウンターを進めてCanvas等をリセット
             st.session_state['canvas_key_counter'] += 1
+
+            # ファイルアップローダーのキーを更新して添付ファイルを強制クリア
+            if "file_uploader_key" in st.session_state:
+                st.session_state["file_uploader_key"] += 1
+            else:
+                st.session_state["file_uploader_key"] = 1
 
         st.header(config.UITexts.SIDEBAR_HEADER)
         if st.button(config.UITexts.RESET_BUTTON_LABEL, use_container_width=True, on_click=handle_full_reset):
@@ -177,3 +194,4 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             """,
             unsafe_allow_html=True
         )
+        
