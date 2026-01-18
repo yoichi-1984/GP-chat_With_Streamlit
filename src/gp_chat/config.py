@@ -1,6 +1,6 @@
 # config.py:
 # --- Constants ---
-MAX_CANVASES = 20
+MAX_CANVASES = 40
 
 # --- Environment Variable Keys ---
 GCP_PROJECT_ID_NAME = "GCP_PROJECT_ID"
