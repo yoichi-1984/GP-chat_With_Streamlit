@@ -1,4 +1,4 @@
-# main.py:
+# main.py :
 import os
 import json
 import sys
@@ -35,7 +35,7 @@ def add_debug_log(message, level="info"):
         st.session_state["debug_logs"].pop(0)
 
 def load_history(uploader_key):
-    """JSONから会話履歴とCanvasを復元します。"""
+    """(既存) Streamlit UploadedFile (JSON) から会話履歴とCanvasを復元します。"""
     uploaded_file = st.session_state.get(uploader_key)
     if not uploaded_file:
         return
@@ -52,11 +52,50 @@ def load_history(uploader_key):
             st.success(config.UITexts.HISTORY_LOADED_SUCCESS)
             st.session_state['system_role_defined'] = True
             st.session_state['canvas_key_counter'] += 1
-            add_debug_log("Session restored from JSON.")
+            
+            # 手動アップロード時は、上書き事故を防ぐため自動保存ファイル名の紐付けを解除
+            # （または新しいファイル名を発行させる）
+            if 'current_chat_filename' in st.session_state:
+                del st.session_state['current_chat_filename']
+                
+            add_debug_log("Session restored from Uploaded JSON.")
 
     except Exception as e:
         st.error(f"Load failed: {e}")
         add_debug_log(f"Restore error: {e}", "error")
+
+def load_history_from_local(filename):
+    """(新規) ローカルの ./chat_log フォルダにあるJSONファイルから履歴を復元します。"""
+    file_path = os.path.join("chat_log", filename)
+    if not os.path.exists(file_path):
+        st.error(f"File not found: {file_path}")
+        return
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            loaded_data = json.load(f)
+        
+        if isinstance(loaded_data, dict) and "messages" in loaded_data:
+            st.session_state['messages'] = loaded_data["messages"]
+            if "python_canvases" in loaded_data:
+                st.session_state['python_canvases'] = loaded_data["python_canvases"]
+            
+            if "multi_code_enabled" in loaded_data:
+                st.session_state['multi_code_enabled'] = loaded_data["multi_code_enabled"]
+
+            st.success(f"Loaded: {filename}")
+            st.session_state['system_role_defined'] = True
+            st.session_state['canvas_key_counter'] += 1
+            
+            # 重要: ローカルから読み込んだ場合は、そのファイル名を継続して使用する（上書き保存のため）
+            st.session_state['current_chat_filename'] = filename
+            
+            add_debug_log(f"Session restored from local file: {filename}")
+            
+    except Exception as e:
+        st.error(f"Load failed: {e}")
+        add_debug_log(f"Restore error: {e}", "error")
+
 
 def recover_interrupted_session():
     """
@@ -65,14 +104,12 @@ def recover_interrupted_session():
     """
     messages = st.session_state.get('messages', [])
     
-    # 最後のメッセージがユーザーで、かつ生成中フラグが立っていない（または中断後のリラン）場合
     if messages and messages[-1]["role"] == "user":
-        last_user_msg = messages.pop() # 履歴から削除
+        last_user_msg = messages.pop()
         content = last_user_msg["content"]
         
-        # テキストをドラフト領域に復元
         st.session_state['draft_input'] = content
-        st.session_state['is_generating'] = False # 生成フラグをリセット
+        st.session_state['is_generating'] = False
         
         add_debug_log("Detected interrupted session. Restored draft text.")
         return True
@@ -101,15 +138,14 @@ def run_chatbot_app():
         if key not in st.session_state:
             st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
 
-    # --- 機能改善: 中断リカバリーチェック ---
-    # アプリのリラン時（停止ボタン押下後など）に、完了していないユーザーメッセージがあれば復元
-    # generate完了後にフラグを落とすため、ここに到達した時点で generating=False かつ Last=User なら中断されたと判断
+    # 中断リカバリーチェック
     if st.session_state.get('messages') and st.session_state['messages'][-1]['role'] == 'user' and not st.session_state.get('is_generating'):
         recover_interrupted_session()
         st.rerun()
 
     sidebar.render_sidebar(
-        supported_extensions, env_files, load_history, 
+        supported_extensions, env_files, load_history,
+        load_history_from_local, # ここに新しい関数を渡す
         lambda i: st.session_state['python_canvases'].__setitem__(i, config.ACE_EDITOR_DEFAULT_CODE),
         lambda i, m: (st.session_state['messages'].append({"role": "user", "content": config.UITexts.REVIEW_PROMPT_MULTI.format(i=i+1) if m else config.UITexts.REVIEW_PROMPT_SINGLE}), st.session_state.__setitem__('is_generating', True)),
         lambda i: utils.run_pylint_validation(st.session_state['python_canvases'][i], i, PROMPTS),
@@ -123,7 +159,6 @@ def run_chatbot_app():
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
     model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3-pro-preview"))
     
-    # 定数値の定義
     INPUT_LIMIT = 1000000
     OUTPUT_LIMIT = 65536
     max_tokens_val = min(int(os.getenv("MAX_TOKEN", "65536")), OUTPUT_LIMIT)
@@ -136,12 +171,10 @@ def run_chatbot_app():
 
     st.caption(f"Backend: {model_id} | Location: {location}")
 
-    # デバッグログ表示
     with st.expander("🛠 システムログ", expanded=False):
         for log in reversed(st.session_state["debug_logs"]):
             st.text(log)
 
-    # システムプロンプト設定
     if not st.session_state['system_role_defined']:
         st.subheader("AIの役割を設定（デフォルトでも、変更してもどちらでもOK）")
         role = st.text_area("System Role", value=PROMPTS.get("system", {}).get("text", ""), height=200)
@@ -151,18 +184,15 @@ def run_chatbot_app():
             st.rerun()
         st.stop()
 
-    # 会話表示
     for msg in st.session_state['messages']:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
                 
-                # Groundingソースの表示（履歴にある場合）
                 if "grounding_metadata" in msg and msg["grounding_metadata"]:
                     with st.expander("🔎 検索ソース (Grounding)"):
                         st.json(msg["grounding_metadata"])
 
-                # トークン使用量の詳細表示
                 if msg["role"] == "assistant" and "usage" in msg:
                     u = msg["usage"]
                     in_p = (u['input_tokens'] / INPUT_LIMIT) * 100
@@ -174,14 +204,11 @@ def run_chatbot_app():
                         f"📤 **Output (Response):** {u['output_tokens']:,} / {OUTPUT_LIMIT:,} ({out_p:.2f}%)"
                     )
 
-    # セッション累計
     if st.session_state['total_usage']['total_tokens'] > 0:
         st.divider()
         st.caption(f"🏁 セッション累計使用トークン: {st.session_state['total_usage']['total_tokens']:,}")
 
-    # --- 機能改善: 入力エリアの分岐 (通常 vs ドラフト復元モード) ---
     if 'draft_input' in st.session_state:
-        # --- リカバリーモード (復元されたテキストの編集) ---
         st.warning("⚠️ 前回の送信が中断されました。テキストを復元しました。")
         with st.form("draft_form"):
             draft_text = st.text_area("編集して再送信", value=st.session_state['draft_input'], height=150)
@@ -201,30 +228,22 @@ def run_chatbot_app():
                 st.rerun()
     
     else:
-        # --- 通常モード ---
         if prompt := st.chat_input("指示を入力...", disabled=st.session_state['is_generating']):
             st.session_state['messages'].append({"role": "user", "content": prompt})
             st.session_state['is_generating'] = True
             st.rerun()
 
-    # 生成ロジック
     if st.session_state['is_generating']:
-        # --- 機能改善: 停止ボタンの表示 ---
-        # 生成中はチャット欄が無効化されるため、ここに停止ボタンを表示します。
         st.markdown("---")
         c_stop, c_info = st.columns([1, 5])
         with c_stop:
             if st.button("■ 送信取り消し", key="stop_generating_btn", type="primary"):
-                # ボタンが押されるとスクリプトはここで再実行(Rerun)されます。
-                # 生成処理は中断されます。
-                # Rerun後、上記の「中断リカバリーチェック」が作動し、テキストが復元されます。
                 st.session_state['is_generating'] = False
                 st.rerun()
         with c_info:
             st.info("生成中... 「送信取り消し」を押すと中断し、テキストを復元します。")
 
         with st.chat_message("assistant"):
-            # --- 機能改善③: Thinking & Grounding Process 表示エリア ---
             thought_area_container = st.empty()
             with thought_area_container.container():
                 thought_status = st.status("思考プロセス (Thinking Process)...", expanded=False)
@@ -232,17 +251,12 @@ def run_chatbot_app():
             
             text_placeholder = st.empty()
             full_response = ""
-            
-            # 思考ログ（Thoughtテキスト + 検索アクション）をまとめる文字列
             full_thought_log = ""
-            
             usage_metadata = None 
             grounding_chunks = []
             
-            # --- 特殊生成モード（Pylint検証等）か通常モードかの判定 ---
             is_special_mode = 'special_generation_messages' in st.session_state and st.session_state['special_generation_messages']
             
-            # リクエストに使用するメッセージリストを決定
             target_messages = []
             if is_special_mode:
                 target_messages = st.session_state['special_generation_messages']
@@ -258,25 +272,18 @@ def run_chatbot_app():
                 else:
                     chat_contents.append(types.Content(role=m["role"], parts=[types.Part.from_text(text=m["content"])]))
             
-            # --- ファイル添付処理 (今回のターン) ---
             file_attachments_meta = []
-            
-            # --- 機能改善: キューの結合 (アップロード分 + クリップボード分) ---
             queue_files = st.session_state.get('uploaded_file_queue', []) + st.session_state.get('clipboard_queue', [])
             
             if not is_special_mode and queue_files:
                 file_parts, file_meta = utils.process_uploaded_files_for_gemini(queue_files)
-                
                 if file_parts and chat_contents:
-                    # ユーザーの最後のメッセージ（直前の入力）にパーツを追加
                     last_user_msg_content = chat_contents[-1]
                     if last_user_msg_content.role == "user":
-                        # テキストパーツの前にファイルパーツを挿入
                         last_user_msg_content.parts = file_parts + last_user_msg_content.parts
                         file_attachments_meta = file_meta
                         add_debug_log(f"Attached {len(file_parts)} files to the request.")
 
-            # Canvasコンテキストの挿入
             if not is_special_mode:
                 context_parts = []
                 for i, code in enumerate(st.session_state['python_canvases']):
@@ -289,7 +296,6 @@ def run_chatbot_app():
             effort = st.session_state.get('reasoning_effort', 'high')
             t_level = types.ThinkingLevel.HIGH if effort == 'high' else types.ThinkingLevel.LOW
 
-            # --- Tool設定 (Google Search) ---
             tools_config = []
             if st.session_state.get('enable_google_search', False) and not is_special_mode:
                 add_debug_log("Google Search Tool Enabled.")
@@ -325,10 +331,8 @@ def run_chatbot_app():
                     
                     cand = chunk.candidates[0]
 
-                    # --- Grounding Metadata (検索アクション) の処理 ---
                     if cand.grounding_metadata:
                         grounding_chunks.append(cand.grounding_metadata)
-                        
                         if cand.grounding_metadata.web_search_queries:
                             queries = cand.grounding_metadata.web_search_queries
                             add_debug_log(f"[Grounding] Queries detected: {queries}")
@@ -337,16 +341,13 @@ def run_chatbot_app():
                                 full_thought_log += action_text
                                 thought_placeholder.markdown(full_thought_log)
 
-                    # --- Content Parts の処理 ---
                     if cand.content and cand.content.parts:
                         for part in cand.content.parts:
                             is_thought = False
                             thought_text = ""
-
                             if hasattr(part, 'thought') and isinstance(part.thought, str) and part.thought:
                                 is_thought = True
                                 thought_text = part.thought
-                            
                             elif hasattr(part, 'thought') and part.thought is True:
                                 is_thought = True
                                 thought_text = part.text
@@ -355,7 +356,6 @@ def run_chatbot_app():
                                 if thought_text:
                                     full_thought_log += thought_text
                                     thought_placeholder.markdown(full_thought_log)
-                            
                             elif part.text:
                                 full_response += part.text
                                 text_placeholder.markdown(full_response + "▌")
@@ -367,7 +367,6 @@ def run_chatbot_app():
                 else:
                     thought_status.update(label="思考完了 (Finished Thinking)", state="complete", expanded=False)
                 
-                # Grounding情報の統合と表示
                 final_grounding_metadata = None
                 if grounding_chunks:
                     last_meta = grounding_chunks[-1]
@@ -379,10 +378,8 @@ def run_chatbot_app():
                                  sources.append({"title": gc.web.title, "uri": gc.web.uri})
                          if sources:
                              final_grounding_metadata["sources"] = sources
-                            
                     if last_meta.web_search_queries:
                         final_grounding_metadata["queries"] = last_meta.web_search_queries
-                    
                     if final_grounding_metadata:
                         with st.expander("🔎 検索ソース (Grounding)"):
                             st.json(final_grounding_metadata)
@@ -405,19 +402,29 @@ def run_chatbot_app():
                 if final_grounding_metadata:
                     assistant_msg["grounding_metadata"] = final_grounding_metadata
                 
-                # --- 履歴への保存処理 ---
                 if is_special_mode:
                     for m in target_messages:
                         if m["role"] == "user":
                             st.session_state['messages'].append(m)
-                    
                     st.session_state['messages'].append(assistant_msg)
                     del st.session_state['special_generation_messages']
                     add_debug_log("Special validation messages merged to history.")
                 else:
                     st.session_state['messages'].append(assistant_msg)
-                
-                # --- 機能改善: 送信待ちファイル & クリップボードキューのクリア ---
+                    
+                    # --- 自動履歴保存 (2往復目以降) ---
+                    if st.session_state.get('auto_save_enabled', True):
+                        current_file = st.session_state.get('current_chat_filename')
+                        new_filename = utils.save_auto_history(
+                            st.session_state['messages'],
+                            st.session_state['python_canvases'],
+                            st.session_state['multi_code_enabled'],
+                            client,
+                            current_filename=current_file
+                        )
+                        if new_filename:
+                            st.session_state['current_chat_filename'] = new_filename
+
                 if 'uploaded_file_queue' in st.session_state:
                      st.session_state['uploaded_file_queue'] = []
                 if 'clipboard_queue' in st.session_state:

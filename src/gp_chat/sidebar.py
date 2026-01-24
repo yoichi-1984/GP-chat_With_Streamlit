@@ -1,11 +1,10 @@
-# sidebar.py: 
 import streamlit as st
 import os
 import json
 import time
 import io
 import datetime
-from PIL import ImageGrab, Image # 追加: クリップボード操作用
+from PIL import ImageGrab, Image # クリップボード操作用
 from streamlit_ace import st_ace
 from . import config
 
@@ -21,9 +20,22 @@ class VirtualUploadedFile:
     def getvalue(self):
         return self._data
 
-def render_sidebar(supported_types, env_files, load_history, handle_clear, handle_review, handle_validation, handle_file_upload):
+def render_sidebar(supported_types, env_files, load_history, load_local_history, handle_clear, handle_review, handle_validation, handle_file_upload):
     """Renders the sidebar with Gemini 3 specific options and model selector."""
     with st.sidebar:
+        # --- CSS Style Injection ---
+        # ファイルアップローダーの「Limit 200MB...」などの補足テキストを非表示にしてスッキリさせる
+        st.markdown(
+            """
+            <style>
+                [data-testid="stFileUploader"] small {
+                    display: none;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
         # --- 1. AIモデル選択エリア ---
         st.header("AIモデル選択")
         
@@ -74,15 +86,49 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             # クリップボードキューもリセット
             if 'clipboard_queue' in st.session_state:
                 st.session_state['clipboard_queue'] = []
+            
+            # 自動保存用のファイル名情報もリセット
+            if 'current_chat_filename' in st.session_state:
+                del st.session_state['current_chat_filename']
 
         st.header(config.UITexts.SIDEBAR_HEADER)
         if st.button(config.UITexts.RESET_BUTTON_LABEL, use_container_width=True, on_click=handle_full_reset):
             st.rerun()
 
-        st.info(config.UITexts.CODEX_MINI_INFO)
+        # 削除: st.info(config.UITexts.CODEX_MINI_INFO)
 
         # History Management
         st.subheader(config.UITexts.HISTORY_SUBHEADER)
+        
+        # --- 自動履歴保存チェックボックス ---
+        if 'auto_save_enabled' not in st.session_state:
+            st.session_state['auto_save_enabled'] = True
+            
+        st.checkbox("■ 自動履歴保存", key='auto_save_enabled', help="会話が2往復以上続くと、./chat_log フォルダに自動保存します。")
+        
+        # --- ローカル保存された履歴からの再開 ---
+        st.caption("📂 保存済み履歴から再開")
+        log_dir = "chat_log"
+        if os.path.exists(log_dir):
+            # jsonファイルを検索し、更新日時が新しい順にソート
+            log_files = [f for f in os.listdir(log_dir) if f.endswith(".json")]
+            log_files.sort(key=lambda x: os.path.getmtime(os.path.join(log_dir, x)), reverse=True)
+            
+            if log_files:
+                selected_log = st.selectbox("履歴ファイルを選択", options=log_files, key="local_history_selector", label_visibility="collapsed")
+                if st.button("読み込む", key="load_local_history_btn", use_container_width=True):
+                    load_local_history(selected_log)
+            else:
+                st.caption("（履歴ファイルはありません）")
+        else:
+             st.caption("（履歴フォルダはありません）")
+
+        # 削除: st.markdown("---") # 行間を詰めるため区切り線を削除
+
+        # --- 既存機能: ファイルアップロードによる再開 ---
+        st.caption("📤 JSONファイルから再開")
+        
+        # 履歴ダウンロードボタン
         if st.session_state.get('messages'):
             history_data = {
                 "messages": st.session_state['messages'],
@@ -98,26 +144,23 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             )
 
         history_uploader_key = f"history_uploader_{st.session_state['canvas_key_counter']}"
-        st.file_uploader(label=config.UITexts.UPLOAD_HISTORY_LABEL, type="json", key=history_uploader_key, on_change=load_history, args=(history_uploader_key,))
+        st.file_uploader(label=config.UITexts.UPLOAD_HISTORY_LABEL, type="json", key=history_uploader_key, on_change=load_history, args=(history_uploader_key,), label_visibility="collapsed")
 
         st.divider()
 
         # --- 3. ファイル添付エリア ---
         st.header(config.UITexts.FILE_UPLOAD_HEADER)
         
-        # キューの初期化
         if 'uploaded_file_queue' not in st.session_state:
             st.session_state['uploaded_file_queue'] = []
         if 'clipboard_queue' not in st.session_state:
             st.session_state['clipboard_queue'] = []
 
-        # ファイルアップローダーのリセット用キー管理
         if "file_uploader_key" not in st.session_state:
             st.session_state["file_uploader_key"] = 0
             
         uploader_key = f"file_uploader_{st.session_state['file_uploader_key']}"
 
-        # --- A. 通常のファイルアップローダー ---
         ALLOWED_EXTENSIONS = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md", "py", "js", "json", "csv"]
         uploaded_files = st.file_uploader(
             label=config.UITexts.FILE_UPLOAD_LABEL,
@@ -132,39 +175,32 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
         else:
             st.session_state['uploaded_file_queue'] = []
 
-        # --- B. クリップボード貼り付けボタン (Windows/Mac Local only) ---
         if st.button("📋 クリップボード画像を追加", use_container_width=True, help="Win+Shift+S等でコピーした画像を読み込みます"):
             try:
                 img = ImageGrab.grabclipboard()
                 if isinstance(img, Image.Image):
-                    # 画像をBytesに変換
                     buf = io.BytesIO()
                     img.save(buf, format='PNG')
                     byte_data = buf.getvalue()
                     
-                    # ユニークなファイル名を生成
                     timestamp = datetime.datetime.now().strftime("%H%M%S")
                     filename = f"clipboard_{timestamp}.png"
                     
-                    # 擬似ファイルを作成してキューに追加
                     virtual_file = VirtualUploadedFile(byte_data, filename, "image/png")
                     st.session_state['clipboard_queue'].append(virtual_file)
                     st.toast(f"画像を追加しました: {filename}", icon="✅")
                 elif img is None:
                     st.toast("クリップボードに画像がありません", icon="⚠️")
                 else:
-                    # ファイルパスのリストが返ってくる場合(Explorerでコピーなど)は今回は非対応
                     st.toast("対応していないクリップボード形式です", icon="⚠️")
             except Exception as e:
                 st.error(f"Clipboard Error: {e}")
 
-        # --- C. 送信待ちファイル一覧表示 ---
         total_files = len(st.session_state['uploaded_file_queue']) + len(st.session_state['clipboard_queue'])
         
         if total_files > 0:
             st.markdown(f"**送信待ち: {total_files} 件**")
             
-            # クリップボード画像のプレビューと削除ボタン
             if st.session_state['clipboard_queue']:
                 st.caption("クリップボード取得分:")
                 for i, vfile in enumerate(st.session_state['clipboard_queue']):
@@ -226,7 +262,7 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             up_key = f"up_s_{st.session_state['canvas_key_counter']}"
             st.file_uploader("Load into Canvas", type=supported_types, key=up_key, on_change=handle_file_upload, args=(0, up_key))
             
-        st.markdown("---") # 区切り線
+        st.markdown("---")
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
@@ -237,3 +273,4 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             """,
             unsafe_allow_html=True
         )
+        

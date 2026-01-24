@@ -1,4 +1,4 @@
-# utils.py:
+# utils.py :
 import os
 import sys
 import yaml
@@ -7,9 +7,14 @@ import subprocess
 import io
 import glob
 import hashlib
+import json
+import re
+import datetime
 from importlib import resources
 import streamlit as st
 from . import config
+from google import genai
+from google.genai import types
 
 # python-docxのインポート（Wordファイル用）
 try:
@@ -19,7 +24,6 @@ except ImportError:
     HAS_DOCX = False
 
 # pywin32 (PowerPoint操作用) のインポート
-# Windows環境かつライブラリがインストールされている場合のみ有効
 try:
     import win32com.client
     import pythoncom
@@ -59,22 +63,16 @@ def extract_text_from_docx(file_bytes):
         return f"[Error parsing docx] {str(e)}"
 
 def _convert_ppt_to_images_core(file_bytes, filename):
-    """
-    PowerPoint変換の実処理を行う内部関数（キャッシュ機能なし）。
-    純粋にバイナリを受け取り、画像のリストを返す。
-    """
+    """PowerPoint変換の実処理を行う内部関数"""
     if not HAS_WIN32:
         print("Server Configuration Error: 'pywin32' library is missing. PowerPoint conversion unavailable.")
         return []
     
-    # 一時ディレクトリの作成
     with tempfile.TemporaryDirectory() as temp_dir:
-        # 1. アップロードされたファイルを一時保存
         temp_ppt_path = os.path.join(temp_dir, filename)
         with open(temp_ppt_path, "wb") as f:
             f.write(file_bytes)
         
-        # 2. 画像出力先ディレクトリ
         output_dir = os.path.join(temp_dir, "slides")
         os.makedirs(output_dir, exist_ok=True)
 
@@ -82,18 +80,10 @@ def _convert_ppt_to_images_core(file_bytes, filename):
         presentation = None
         
         try:
-            # Streamlitは別スレッドで動くため、COMの初期化が必要
             pythoncom.CoInitialize()
-            
-            # PowerPointアプリケーションの起動
             ppt_app = win32com.client.Dispatch("PowerPoint.Application")
-            
-            # プレゼンテーションを開く
             presentation = ppt_app.Presentations.Open(os.path.abspath(temp_ppt_path), ReadOnly=True, WithWindow=False)
-            
-            # 各スライドを画像としてエクスポート (PNG)
             presentation.SaveAs(os.path.abspath(os.path.join(output_dir, "slide.png")), 18) # 18 = ppSaveAsPNG
-            
         except Exception as e:
             print(f"PowerPoint conversion error: {e}")
             return []
@@ -105,7 +95,6 @@ def _convert_ppt_to_images_core(file_bytes, filename):
                     pass
             ppt_app = None
         
-        # 3. 出力された画像を読み込む
         image_data_list = []
         search_path = os.path.join(output_dir, "*.PNG")
         slide_files = glob.glob(search_path)
@@ -120,7 +109,7 @@ def _convert_ppt_to_images_core(file_bytes, filename):
                 search_path = os.path.join(output_dir, "slide", "*.png")
                 slide_files = glob.glob(search_path)
 
-        slide_files.sort(key=lambda x: len(x)) # 簡易ソート
+        slide_files.sort(key=lambda x: len(x))
 
         for slide_file in slide_files:
             with open(slide_file, "rb") as img_f:
@@ -130,35 +119,21 @@ def _convert_ppt_to_images_core(file_bytes, filename):
         return image_data_list
 
 def convert_ppt_to_images_win32(file_bytes, filename):
-    """
-    ラッパー関数。st.session_stateを使用して手動でキャッシュ管理を行う。
-    """
+    """ラッパー関数。st.session_stateを使用して手動でキャッシュ管理を行う。"""
     if not HAS_WIN32:
         return []
         
-    # ハッシュ値を計算（これをキャッシュのキーにする）
     file_hash = hashlib.md5(file_bytes).hexdigest()
     
-    # セッションステート内にキャッシュ用の辞書を確保
     if "ppt_conversion_cache" not in st.session_state:
         st.session_state["ppt_conversion_cache"] = {}
 
-    # --- キャッシュヒット判定 ---
     if file_hash in st.session_state["ppt_conversion_cache"]:
-        print(f"[DEBUG] Cache HIT: Using cached images for {filename}, Hash: {file_hash}")
-        # キャッシュからデータを返して終了（再変換しない）
         return st.session_state["ppt_conversion_cache"][file_hash]
 
-    # --- キャッシュミス：変換実行 ---
-    print(f"[DEBUG] Cache MISS: Executing conversion for {filename}, Hash: {file_hash}")
-    
-    # ユーザーへのフィードバック（初回のみ）
     st.toast(f"Processing PowerPoint: {filename}...", icon="🔄")
-    
-    # 実処理の実行
     images = _convert_ppt_to_images_core(file_bytes, filename)
     
-    # 結果をキャッシュに保存
     if images:
         st.session_state["ppt_conversion_cache"][file_hash] = images
         st.toast(f"Converted {len(images)} slides.", icon="✅")
@@ -166,47 +141,41 @@ def convert_ppt_to_images_win32(file_bytes, filename):
     return images
 
 def process_uploaded_files_for_gemini(uploaded_files):
-    """
-    StreamlitのUploadedFileリストを受け取り、
-    Gemini API用のPartsリストと、表示用のメタデータリストを返す。
-    """
+    """アップロードファイルをGemini API用のPartsリストに変換する"""
     from google.genai import types
     
     api_parts = []
     display_info = []
 
     for uploaded_file in uploaded_files:
+        # VirtualUploadedFile (クリップボード) と Streamlit UploadedFile の両方に対応
         file_bytes = uploaded_file.getvalue()
-        mime_type = uploaded_file.type
-        filename = uploaded_file.name
+        
+        # VirtualUploadedFileの場合は属性として持っている、Streamlitの場合は属性
+        mime_type = getattr(uploaded_file, "type", "application/octet-stream")
+        filename = getattr(uploaded_file, "name", "unknown_file")
+        
         file_ext = os.path.splitext(filename)[1].lower()
 
-        # Word Document (.docx)
         if "wordprocessingml" in mime_type or filename.endswith(".docx"):
             text_content = extract_text_from_docx(file_bytes)
             prompt_text = f"\n\n[Attached Document: {filename}]\n{text_content}\n"
             api_parts.append(types.Part.from_text(text=prompt_text))
             display_info.append({"name": filename, "type": "docx", "size": len(file_bytes)})
 
-        # PowerPoint (.ppt, .pptx) -> 画像変換 (Windows Only)
         elif file_ext in [".ppt", ".pptx"]:
-            # キャッシュロジックを内包した関数を呼び出す
             images = convert_ppt_to_images_win32(file_bytes, filename)
-            
             if images:
                 for idx, (img_bytes, img_mime) in enumerate(images):
                     api_parts.append(types.Part.from_bytes(data=img_bytes, mime_type=img_mime))
-                
                 display_info.append({"name": filename, "type": "pptx(images)", "size": len(file_bytes)})
             else:
                 st.error(f"Failed to convert PowerPoint: {filename}")
 
-        # PDF & Images
         elif mime_type == "application/pdf" or mime_type.startswith("image/"):
             api_parts.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))
             display_info.append({"name": filename, "type": mime_type, "size": len(file_bytes)})
         
-        # Text based files
         elif mime_type.startswith("text/") or filename.endswith((".py", ".js", ".md", ".txt", ".json")):
             try:
                 text_content = file_bytes.decode("utf-8")
@@ -222,9 +191,7 @@ def process_uploaded_files_for_gemini(uploaded_files):
     return api_parts, display_info
 
 def run_pylint_validation(canvas_code, canvas_index, prompts):
-    """
-    指定されたコードに対してpylintを実行し、分析プロンプトを生成する
-    """
+    """コードに対してpylintを実行し、分析プロンプトを生成する"""
     if not canvas_code or canvas_code.strip() == "" or canvas_code.strip() == config.ACE_EDITOR_DEFAULT_CODE.strip():
         st.toast(config.UITexts.NO_CODE_TO_VALIDATE, icon="⚠️")
         return
@@ -239,7 +206,6 @@ def run_pylint_validation(canvas_code, canvas_index, prompts):
                 tmp_file.write(canvas_code.replace('\r\n', '\n'))
                 tmp_file.flush()
             
-            # pylint実行
             result = subprocess.run(
                 [sys.executable, "-m", "pylint", tmp_file_path],
                 capture_output=True, text=True, check=False
@@ -265,7 +231,6 @@ def run_pylint_validation(canvas_code, canvas_index, prompts):
         st.sidebar.success(f"✅ Canvas-{canvas_index + 1}: pylint検証完了。問題なし。")
         return
 
-    # Geminiへの分析依頼プロンプト
     validation_template = prompts.get("validation", {}).get("text", "以下はpylintのレポートです。解析してください:\n{pylint_report}\n\n対象コード:\n{code_for_prompt}")
     code_for_prompt = f"```python\n{canvas_code}\n```"
     validation_prompt = validation_template.format(code_for_prompt=code_for_prompt, pylint_report=pylint_report)
@@ -281,4 +246,127 @@ def load_app_config():
             return yaml.safe_load(f)
     except Exception:
         return {}
+
+# --- 自動履歴保存機能用の新規関数 ---
+
+def sanitize_filename(filename):
+    """OSで禁止されている文字を置換し、長さを制限する"""
+    # Windows等の禁止文字: \ / : * ? " < > |
+    safe_name = re.sub(r'[\\/*?:"<>|]', '_', filename)
+    # 改行コードなどを削除
+    safe_name = safe_name.replace('\n', '').replace('\r', '').strip()
+    return safe_name
+
+def get_unique_filename(directory, base_filename):
+    """同名ファイルが存在する場合、連番を付与してユニークなファイル名を生成する"""
+    name, ext = os.path.splitext(base_filename)
+    counter = 1
+    unique_filename = base_filename
+    
+    while os.path.exists(os.path.join(directory, unique_filename)):
+        unique_filename = f"{name}_{counter}{ext}"
+        counter += 1
+    
+    return unique_filename
+
+def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
+    """
+    会話履歴からチャット名を生成する。
+    軽量なモデルを使用し、Thinking LevelはLOW、GroundingはOFF。
+    """
+    try:
+        # システムプロンプトを除く直近の会話内容を抽出（軽量化のためテキストのみ）
+        conversation_text = ""
+        for m in messages:
+            if m["role"] != "system":
+                # コンテンツが長い場合は切り詰める
+                content = m.get("content", "")[:500]
+                conversation_text += f"{m['role']}: {content}\n"
+        
+        prompt = (
+            "以下の会話の内容を、15文字から20文字程度の** 日本語の **短い要約（タイトル）にしてください。\n"
+            "ファイル名として使用するため、記号は含めないでください。\n"
+            "例: Pythonのクラス継承について\n"
+            "例: 2024年のAI動向\n\n"
+            f"会話内容:\n{conversation_text}"
+        )
+
+        # タイトル生成用の設定 (Thinking Level: LOW)
+        gen_config = types.GenerateContentConfig(
+            max_output_tokens=50,
+            temperature=0.7
+        )
+        if "gemini-3" in model_id:
+             gen_config.thinking_config = types.ThinkingConfig(
+                thinking_level=types.ThinkingLevel.LOW,
+                include_thoughts=True # FlashモデルでもThinkingが有効な場合があるため念のため
+            )
+
+        response = client.models.generate_content(
+            model=model_id,
+            contents=prompt,
+            config=gen_config
+        )
+        
+        # Thinkingが含まれる場合のパース
+        title = ""
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                # テキストパートを採用（Thoughtパートは無視）
+                if part.text and (not hasattr(part, 'thought') or not part.thought):
+                    title += part.text
+        
+        if not title:
+            title = "無題のチャット"
+            
+        return sanitize_filename(title.strip())
+
+    except Exception as e:
+        print(f"Title generation failed: {e}")
+        return "自動保存チャット"
+
+def save_auto_history(messages, canvases, multi_code_enabled, client, current_filename=None):
+    """
+    履歴を自動保存する。
+    current_filenameがあればそれを使い（上書き）、なければ新規生成する。
+    """
+    log_dir = "chat_log"
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # 有効な会話（System以外）の数をカウント
+    valid_msgs = [m for m in messages if m["role"] != "system"]
+    
+    # 2往復未満（4メッセージ未満）なら何もしない
+    if len(valid_msgs) < 4:
+        return None
+
+    # ファイル名が未定の場合、新規生成
+    if not current_filename:
+        # 日付プレフィックス (DDMMYY)
+        date_prefix = datetime.datetime.now().strftime("%d%m%y")
+        
+        # タイトル生成
+        chat_title = generate_chat_title(messages, client)
+        
+        base_filename = f"{date_prefix}_{chat_title}.json"
+        filename = get_unique_filename(log_dir, base_filename)
+        current_filename = filename
+    
+    # 保存データ構築
+    history_data = {
+        "messages": messages,
+        "python_canvases": canvases,
+        "multi_code_enabled": multi_code_enabled,
+        "saved_at": datetime.datetime.now().isoformat()
+    }
+    
+    file_path = os.path.join(log_dir, current_filename)
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(history_data, f, ensure_ascii=False, indent=2)
+        print(f"Auto-saved history to: {file_path}")
+        return current_filename
+    except Exception as e:
+        print(f"Auto-save failed: {e}")
+        return current_filename
     
