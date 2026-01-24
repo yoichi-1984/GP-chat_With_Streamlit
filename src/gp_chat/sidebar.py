@@ -3,8 +3,23 @@ import streamlit as st
 import os
 import json
 import time
+import io
+import datetime
+from PIL import ImageGrab, Image # 追加: クリップボード操作用
 from streamlit_ace import st_ace
 from . import config
+
+# --- 擬似的なアップロードファイルクラス ---
+class VirtualUploadedFile:
+    """クリップボードの画像をStreamlitのUploadedFileのように振る舞わせるクラス"""
+    def __init__(self, file_bytes, name, mime_type):
+        self._data = file_bytes
+        self.name = name
+        self.type = mime_type
+        self.size = len(file_bytes)
+    
+    def getvalue(self):
+        return self._data
 
 def render_sidebar(supported_types, env_files, load_history, handle_clear, handle_review, handle_validation, handle_file_upload):
     """Renders the sidebar with Gemini 3 specific options and model selector."""
@@ -12,15 +27,11 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
         # --- 1. AIモデル選択エリア ---
         st.header("AIモデル選択")
         
-        # .env変更時の自動リセットロジックを削除しました
-        # 環境が変わっても会話履歴は保持されます
-        
         st.selectbox(
             label="Environment (.env)",
             options=env_files,
             format_func=lambda x: os.path.basename(x),
             key='selected_env_file',
-            # on_changeコールバックを削除
             disabled=st.session_state.get('is_generating', False)
         )
 
@@ -48,25 +59,21 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
 
         # --- 2. 設定・履歴エリア ---
         def handle_full_reset():
-            # 保持したい設定キーを定義 (.envのみ)
             keys_to_keep = ['selected_env_file']
-
-            # デフォルト値のリセットループ
             for key, value in config.SESSION_STATE_DEFAULTS.items():
-                # 保持対象キーはスキップ
                 if key in keys_to_keep:
                     continue
-                # それ以外はデフォルト値で上書き (モデルやThinking Levelもリセットされる)
                 st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
             
-            # ウィジェットのIDカウンターを進めてCanvas等をリセット
             st.session_state['canvas_key_counter'] += 1
-
-            # ファイルアップローダーのキーを更新して添付ファイルを強制クリア
             if "file_uploader_key" in st.session_state:
                 st.session_state["file_uploader_key"] += 1
             else:
                 st.session_state["file_uploader_key"] = 1
+            
+            # クリップボードキューもリセット
+            if 'clipboard_queue' in st.session_state:
+                st.session_state['clipboard_queue'] = []
 
         st.header(config.UITexts.SIDEBAR_HEADER)
         if st.button(config.UITexts.RESET_BUTTON_LABEL, use_container_width=True, on_click=handle_full_reset):
@@ -98,9 +105,11 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
         # --- 3. ファイル添付エリア ---
         st.header(config.UITexts.FILE_UPLOAD_HEADER)
         
-        # キューの初期化（未定義の場合の安全策）
+        # キューの初期化
         if 'uploaded_file_queue' not in st.session_state:
             st.session_state['uploaded_file_queue'] = []
+        if 'clipboard_queue' not in st.session_state:
+            st.session_state['clipboard_queue'] = []
 
         # ファイルアップローダーのリセット用キー管理
         if "file_uploader_key" not in st.session_state:
@@ -108,10 +117,8 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             
         uploader_key = f"file_uploader_{st.session_state['file_uploader_key']}"
 
-        # 許可する拡張子
-        # PPT, PPTXを追加しました
+        # --- A. 通常のファイルアップローダー ---
         ALLOWED_EXTENSIONS = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md", "py", "js", "json", "csv"]
-
         uploaded_files = st.file_uploader(
             label=config.UITexts.FILE_UPLOAD_LABEL,
             type=ALLOWED_EXTENSIONS,
@@ -120,20 +127,56 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             key=uploader_key
         )
         
-        # DEBUG info
-        if uploaded_files:
-            st.sidebar.markdown("--- 🛠 DEBUG INFO ---")
-            st.sidebar.text(f"Widget Files: {len(uploaded_files)}")
-            for f in uploaded_files:
-                st.sidebar.text(f"- {f.name} ({f.size}B)")
-        
-        # Sync to session state
         if uploaded_files:
             st.session_state['uploaded_file_queue'] = uploaded_files
-            file_count = len(uploaded_files)
-            st.info(f"送信待ちファイル: {file_count} 件\nチャットを送信するとAIに渡されます。")
         else:
             st.session_state['uploaded_file_queue'] = []
+
+        # --- B. クリップボード貼り付けボタン (Windows/Mac Local only) ---
+        if st.button("📋 クリップボード画像を追加", use_container_width=True, help="Win+Shift+S等でコピーした画像を読み込みます"):
+            try:
+                img = ImageGrab.grabclipboard()
+                if isinstance(img, Image.Image):
+                    # 画像をBytesに変換
+                    buf = io.BytesIO()
+                    img.save(buf, format='PNG')
+                    byte_data = buf.getvalue()
+                    
+                    # ユニークなファイル名を生成
+                    timestamp = datetime.datetime.now().strftime("%H%M%S")
+                    filename = f"clipboard_{timestamp}.png"
+                    
+                    # 擬似ファイルを作成してキューに追加
+                    virtual_file = VirtualUploadedFile(byte_data, filename, "image/png")
+                    st.session_state['clipboard_queue'].append(virtual_file)
+                    st.toast(f"画像を追加しました: {filename}", icon="✅")
+                elif img is None:
+                    st.toast("クリップボードに画像がありません", icon="⚠️")
+                else:
+                    # ファイルパスのリストが返ってくる場合(Explorerでコピーなど)は今回は非対応
+                    st.toast("対応していないクリップボード形式です", icon="⚠️")
+            except Exception as e:
+                st.error(f"Clipboard Error: {e}")
+
+        # --- C. 送信待ちファイル一覧表示 ---
+        total_files = len(st.session_state['uploaded_file_queue']) + len(st.session_state['clipboard_queue'])
+        
+        if total_files > 0:
+            st.markdown(f"**送信待ち: {total_files} 件**")
+            
+            # クリップボード画像のプレビューと削除ボタン
+            if st.session_state['clipboard_queue']:
+                st.caption("クリップボード取得分:")
+                for i, vfile in enumerate(st.session_state['clipboard_queue']):
+                    col_del, col_name = st.columns([1, 5])
+                    with col_del:
+                        if st.button("❌", key=f"del_clip_{i}"):
+                            st.session_state['clipboard_queue'].pop(i)
+                            st.rerun()
+                    with col_name:
+                        st.text(vfile.name)
+        else:
+            st.caption("ファイルは選択されていません")
 
         st.divider()
 
@@ -194,4 +237,3 @@ def render_sidebar(supported_types, env_files, load_history, handle_clear, handl
             """,
             unsafe_allow_html=True
         )
-        

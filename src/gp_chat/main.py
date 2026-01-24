@@ -66,18 +66,11 @@ def recover_interrupted_session():
     messages = st.session_state.get('messages', [])
     
     # 最後のメッセージがユーザーで、かつ生成中フラグが立っていない（または中断後のリラン）場合
-    # ただし、systemプロンプトだけの時は除外
     if messages and messages[-1]["role"] == "user":
-        # ここで「AIの応答待ち」の状態でないことを確認するロジックが必要ですが、
-        # Streamlitのフロー上、'is_generating' が True のまま中断されることもあります。
-        # したがって、「起動時に最後のメッセージがユーザー」＝「応答が完了していない」とみなします。
-        
         last_user_msg = messages.pop() # 履歴から削除
         content = last_user_msg["content"]
         
-        # ファイル添付があった場合の処理（簡易的にテキストだけ復元）
-        # ※本来は添付ファイルも復元すべきですが、今回はテキスト復元を優先します
-        
+        # テキストをドラフト領域に復元
         st.session_state['draft_input'] = content
         st.session_state['is_generating'] = False # 生成フラグをリセット
         
@@ -110,16 +103,10 @@ def run_chatbot_app():
 
     # --- 機能改善: 中断リカバリーチェック ---
     # アプリのリラン時（停止ボタン押下後など）に、完了していないユーザーメッセージがあれば復元
-    # ただし、通常の「送信直後（is_generating=Trueになりたて）」は除外する必要があります。
-    # ここでは、「送信ボタンを押した直後」を区別するのが難しいため、
-    # シンプルに「生成処理ブロックに入らずにここに来た＝中断された」と判断します。
-    # 実際には generate ロジックの後でフラグを落とすので、次回起動時にフラグが残っている or LastがUserなら中断です。
-    
-    # Session Stateに 'draft_input' がない場合のみチェック
-    if 'draft_input' not in st.session_state:
-        # 直前の実行が generate 処理まで到達せずに終了した場合の検知は難しいですが、
-        # 「停止」ボタンを押すとスクリプトが停止し、次回リロード時に実行されます。
-        pass
+    # generate完了後にフラグを落とすため、ここに到達した時点で generating=False かつ Last=User なら中断されたと判断
+    if st.session_state.get('messages') and st.session_state['messages'][-1]['role'] == 'user' and not st.session_state.get('is_generating'):
+        recover_interrupted_session()
+        st.rerun()
 
     sidebar.render_sidebar(
         supported_extensions, env_files, load_history, 
@@ -193,13 +180,6 @@ def run_chatbot_app():
         st.caption(f"🏁 セッション累計使用トークン: {st.session_state['total_usage']['total_tokens']:,}")
 
     # --- 機能改善: 入力エリアの分岐 (通常 vs ドラフト復元モード) ---
-    
-    # 中断からの復帰ロジック:
-    # 直前のターンがユーザーで終わっており、かつ今 generating でなければ、それは「中断された」ものとみなす
-    if st.session_state.get('messages') and st.session_state['messages'][-1]['role'] == 'user' and not st.session_state.get('is_generating'):
-        recover_interrupted_session()
-        st.rerun()
-
     if 'draft_input' in st.session_state:
         # --- リカバリーモード (復元されたテキストの編集) ---
         st.warning("⚠️ 前回の送信が中断されました。テキストを復元しました。")
@@ -231,11 +211,9 @@ def run_chatbot_app():
     if st.session_state['is_generating']:
         # --- 機能改善: 停止ボタンの表示 ---
         # 生成中はチャット欄が無効化されるため、ここに停止ボタンを表示します。
-        # 注意: Streamlitの仕様上、ここでのボタンクリックは「次のRerun」を引き起こし、スクリプトを中断させます。
         st.markdown("---")
         c_stop, c_info = st.columns([1, 5])
         with c_stop:
-            # type="primary" で赤く目立たせることはできませんが、配置で示します
             if st.button("■ 送信取り消し", key="stop_generating_btn", type="primary"):
                 # ボタンが押されるとスクリプトはここで再実行(Rerun)されます。
                 # 生成処理は中断されます。
@@ -251,8 +229,7 @@ def run_chatbot_app():
             with thought_area_container.container():
                 thought_status = st.status("思考プロセス (Thinking Process)...", expanded=False)
                 thought_placeholder = thought_status.empty()
-            # -----------------------------------------------------
-
+            
             text_placeholder = st.empty()
             full_response = ""
             
@@ -284,14 +261,17 @@ def run_chatbot_app():
             # --- ファイル添付処理 (今回のターン) ---
             file_attachments_meta = []
             
-            queue_files = st.session_state.get('uploaded_file_queue', [])
+            # --- 機能改善: キューの結合 (アップロード分 + クリップボード分) ---
+            queue_files = st.session_state.get('uploaded_file_queue', []) + st.session_state.get('clipboard_queue', [])
             
-            if not is_special_mode and st.session_state.get('uploaded_file_queue'):
-                file_parts, file_meta = utils.process_uploaded_files_for_gemini(st.session_state['uploaded_file_queue'])
+            if not is_special_mode and queue_files:
+                file_parts, file_meta = utils.process_uploaded_files_for_gemini(queue_files)
                 
                 if file_parts and chat_contents:
+                    # ユーザーの最後のメッセージ（直前の入力）にパーツを追加
                     last_user_msg_content = chat_contents[-1]
                     if last_user_msg_content.role == "user":
+                        # テキストパーツの前にファイルパーツを挿入
                         last_user_msg_content.parts = file_parts + last_user_msg_content.parts
                         file_attachments_meta = file_meta
                         add_debug_log(f"Attached {len(file_parts)} files to the request.")
@@ -387,6 +367,7 @@ def run_chatbot_app():
                 else:
                     thought_status.update(label="思考完了 (Finished Thinking)", state="complete", expanded=False)
                 
+                # Grounding情報の統合と表示
                 final_grounding_metadata = None
                 if grounding_chunks:
                     last_meta = grounding_chunks[-1]
@@ -436,13 +417,13 @@ def run_chatbot_app():
                 else:
                     st.session_state['messages'].append(assistant_msg)
                 
-                # 送信待ちファイルのクリア（正常終了時のみ）
+                # --- 機能改善: 送信待ちファイル & クリップボードキューのクリア ---
                 if 'uploaded_file_queue' in st.session_state:
                      st.session_state['uploaded_file_queue'] = []
+                if 'clipboard_queue' in st.session_state:
+                     st.session_state['clipboard_queue'] = []
 
             except Exception as e:
-                # 中断(Stop)の場合もここに来る可能性がありますが、
-                # StopボタンによるRerunの場合は例外の前にスクリプトが停止することが多いです。
                 st.error(f"Error during generation: {e}")
                 add_debug_log(str(e), "error")
             finally:
