@@ -1,4 +1,3 @@
-# main.py :
 import os
 import json
 import sys
@@ -53,8 +52,6 @@ def load_history(uploader_key):
             st.session_state['system_role_defined'] = True
             st.session_state['canvas_key_counter'] += 1
             
-            # 手動アップロード時は、上書き事故を防ぐため自動保存ファイル名の紐付けを解除
-            # （または新しいファイル名を発行させる）
             if 'current_chat_filename' in st.session_state:
                 del st.session_state['current_chat_filename']
                 
@@ -87,7 +84,6 @@ def load_history_from_local(filename):
             st.session_state['system_role_defined'] = True
             st.session_state['canvas_key_counter'] += 1
             
-            # 重要: ローカルから読み込んだ場合は、そのファイル名を継続して使用する（上書き保存のため）
             st.session_state['current_chat_filename'] = filename
             
             add_debug_log(f"Session restored from local file: {filename}")
@@ -95,7 +91,6 @@ def load_history_from_local(filename):
     except Exception as e:
         st.error(f"Load failed: {e}")
         add_debug_log(f"Restore error: {e}", "error")
-
 
 def recover_interrupted_session():
     """
@@ -143,13 +138,32 @@ def run_chatbot_app():
         recover_interrupted_session()
         st.rerun()
 
+    # --- 機能改善: Canvas読み込み時の文字コード対応関数 ---
+    def handle_canvas_upload(index, key):
+        uploaded_file = st.session_state.get(key)
+        if uploaded_file:
+            bytes_data = uploaded_file.getvalue()
+            text = ""
+            try:
+                # まずUTF-8で試す
+                text = bytes_data.decode("utf-8")
+            except UnicodeDecodeError:
+                try:
+                    # ダメならCP932 (Windows Shift-JIS) で試す
+                    text = bytes_data.decode("cp932")
+                except UnicodeDecodeError:
+                    st.toast("⚠️ 対応していない文字コードです (UTF-8, CP932以外)", icon="❌")
+                    return
+            
+            st.session_state['python_canvases'][index] = text
+
     sidebar.render_sidebar(
         supported_extensions, env_files, load_history,
-        load_history_from_local, # ここに新しい関数を渡す
+        load_history_from_local,
         lambda i: st.session_state['python_canvases'].__setitem__(i, config.ACE_EDITOR_DEFAULT_CODE),
         lambda i, m: (st.session_state['messages'].append({"role": "user", "content": config.UITexts.REVIEW_PROMPT_MULTI.format(i=i+1) if m else config.UITexts.REVIEW_PROMPT_SINGLE}), st.session_state.__setitem__('is_generating', True)),
         lambda i: utils.run_pylint_validation(st.session_state['python_canvases'][i], i, PROMPTS),
-        lambda i, k: st.session_state['python_canvases'].__setitem__(i, st.session_state[k].getvalue().decode("utf-8")) if st.session_state.get(k) else None
+        handle_canvas_upload # ラムダ式の代わりに新関数を使用
     )
     
     # --- .env ロードと Client 初期化 ---
@@ -412,7 +426,6 @@ def run_chatbot_app():
                 else:
                     st.session_state['messages'].append(assistant_msg)
                     
-                    # --- 自動履歴保存 (2往復目以降) ---
                     if st.session_state.get('auto_save_enabled', True):
                         current_file = st.session_state.get('current_chat_filename')
                         new_filename = utils.save_auto_history(
