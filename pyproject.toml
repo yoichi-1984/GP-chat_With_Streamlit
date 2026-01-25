@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gp-chat"
-version = "0.1.5"
+version = "0.1.6"
 description = "GP-chat with Streamlit"
 authors = [
     { name = "yoichi-1984", email = "yoichi.1984.engineer@gmail.com" },

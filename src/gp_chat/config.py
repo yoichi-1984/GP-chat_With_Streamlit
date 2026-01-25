@@ -13,7 +13,7 @@ ACE_EDITOR_SETTINGS = {
     "theme": "monokai",
     "font_size": 14,
     "show_gutter": True,
-    "wrap": True,
+    "wrap": False,
 }
 ACE_EDITOR_DEFAULT_CODE = "# コードはここに \n"
 
