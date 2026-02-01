@@ -284,7 +284,7 @@ def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
                 conversation_text += f"{m['role']}: {content}\n"
         
         prompt = (
-            "以下の会話の内容を、15文字から20文字程度の** 日本語の **短い要約（タイトル）にしてください。\n"
+            "以下の会話の内容を、15文字から20文字程度の** 日本語ベースの **短い要約（タイトル）にしてください。必要なら多少の英語を使ってもOKです。\n"
             "ファイル名として使用するため、記号は含めないでください。\n"
             "例: Pythonのクラス継承について\n"
             "例: 2024年のAI動向\n\n"
@@ -293,8 +293,8 @@ def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
 
         # タイトル生成用の設定 (Thinking Level: LOW)
         gen_config = types.GenerateContentConfig(
-            max_output_tokens=50,
-            temperature=0.7
+            max_output_tokens=10000,
+            temperature=0.1
         )
         if "gemini-3" in model_id:
              gen_config.thinking_config = types.ThinkingConfig(
