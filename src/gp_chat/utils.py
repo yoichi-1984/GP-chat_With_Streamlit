@@ -342,8 +342,8 @@ def save_auto_history(messages, canvases, multi_code_enabled, client, current_fi
 
     # ファイル名が未定の場合、新規生成
     if not current_filename:
-        # 日付プレフィックス (DDMMYY)
-        date_prefix = datetime.datetime.now().strftime("%d%m%y")
+        # 日付プレフィックス (YYDDMMに修正)
+        date_prefix = datetime.datetime.now().strftime("%y%m%d")
         
         # タイトル生成
         chat_title = generate_chat_title(messages, client)
