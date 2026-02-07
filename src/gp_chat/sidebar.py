@@ -1,3 +1,4 @@
+# sidebar.py:
 import streamlit as st
 import os
 import json
@@ -95,7 +96,15 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         if st.button(config.UITexts.RESET_BUTTON_LABEL, use_container_width=True, on_click=handle_full_reset):
             st.rerun()
 
-        # 削除: st.info(config.UITexts.CODEX_MINI_INFO)
+        # --- 追加機能: グラフ描画・データ分析モード ---
+        if 'auto_plot_enabled' not in st.session_state:
+            st.session_state['auto_plot_enabled'] = False
+
+        st.checkbox(
+            label="📈 グラフ描画・データ分析（β機能）", 
+            key='auto_plot_enabled', 
+            help="ONにすると、AIが生成したPythonコードを実行し、グラフ描画や計算結果を表示します。\nアップロードしたファイルは `files['name.csv']` でアクセス可能です。"
+        )
 
         # History Management
         st.subheader(config.UITexts.HISTORY_SUBHEADER)
@@ -122,8 +131,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 st.caption("（履歴ファイルはありません）")
         else:
              st.caption("（履歴フォルダはありません）")
-
-        # 削除: st.markdown("---") # 行間を詰めるため区切り線を削除
 
         # --- 既存機能: ファイルアップロードによる再開 ---
         st.caption("📤 JSONファイルから再開")

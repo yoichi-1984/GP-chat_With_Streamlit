@@ -3,6 +3,8 @@ import json
 import sys
 import time
 import traceback
+import re
+import base64
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -16,10 +18,14 @@ try:
     from gp_chat import config
     from gp_chat import utils
     from gp_chat import sidebar
+    from gp_chat import data_manager
+    from gp_chat import execution_engine
 except ImportError:
     import config
     import utils
     import sidebar
+    import data_manager
+    import execution_engine
 
 # --- Helper Functions ---
 
@@ -119,6 +125,9 @@ def run_chatbot_app():
     if "debug_logs" not in st.session_state:
         st.session_state["debug_logs"] = []
 
+    # Initialize Data Manager
+    dm = data_manager.SessionDataManager()
+
     # サイドバー描画
     PROMPTS = utils.load_prompts()
     APP_CONFIG = utils.load_app_config()
@@ -163,7 +172,7 @@ def run_chatbot_app():
         lambda i: st.session_state['python_canvases'].__setitem__(i, config.ACE_EDITOR_DEFAULT_CODE),
         lambda i, m: (st.session_state['messages'].append({"role": "user", "content": config.UITexts.REVIEW_PROMPT_MULTI.format(i=i+1) if m else config.UITexts.REVIEW_PROMPT_SINGLE}), st.session_state.__setitem__('is_generating', True)),
         lambda i: utils.run_pylint_validation(st.session_state['python_canvases'][i], i, PROMPTS),
-        handle_canvas_upload # ラムダ式の代わりに新関数を使用
+        handle_canvas_upload 
     )
     
     # --- .env ロードと Client 初期化 ---
@@ -203,6 +212,15 @@ def run_chatbot_app():
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
                 
+                # --- 画像 (グラフ) の表示ロジック ---
+                if "images" in msg and msg["images"]:
+                    for img_b64 in msg["images"]:
+                        try:
+                            st.image(base64.b64decode(img_b64), use_container_width=True)
+                        except Exception as e:
+                            st.error(f"画像表示エラー: {e}")
+                # -------------------------------
+
                 if "grounding_metadata" in msg and msg["grounding_metadata"]:
                     with st.expander("🔎 検索ソース (Grounding)"):
                         st.json(msg["grounding_metadata"])
@@ -289,6 +307,20 @@ def run_chatbot_app():
             file_attachments_meta = []
             queue_files = st.session_state.get('uploaded_file_queue', []) + st.session_state.get('clipboard_queue', [])
             
+            # --- Analysis Path: 物理ファイルの保存 (実行モードON時のみ) ---
+            available_files_map = {}
+            if st.session_state.get('auto_plot_enabled', False) and not is_special_mode:
+                for f in queue_files:
+                    try:
+                        # 既存のテキスト抽出処理に影響を与えないよう、data_manager内でseek管理済み
+                        f_path, f_name = dm.save_file(f)
+                        if f_path:
+                            available_files_map[f_name] = f_path
+                            add_debug_log(f"Saved temp file for analysis: {f_name}")
+                    except Exception as e:
+                        add_debug_log(f"Failed to save temp file {f.name}: {e}", "error")
+
+            # --- Context Path: 既存のテキスト抽出処理 (変更なし) ---
             if not is_special_mode and queue_files:
                 file_parts, file_meta = utils.process_uploaded_files_for_gemini(queue_files)
                 if file_parts and chat_contents:
@@ -386,12 +418,12 @@ def run_chatbot_app():
                     last_meta = grounding_chunks[-1]
                     final_grounding_metadata = {}
                     if last_meta.grounding_chunks:
-                         sources = []
-                         for gc in last_meta.grounding_chunks:
-                             if gc.web:
-                                 sources.append({"title": gc.web.title, "uri": gc.web.uri})
-                         if sources:
-                             final_grounding_metadata["sources"] = sources
+                        sources = []
+                        for gc in last_meta.grounding_chunks:
+                            if gc.web:
+                                sources.append({"title": gc.web.title, "uri": gc.web.uri})
+                        if sources:
+                            final_grounding_metadata["sources"] = sources
                     if last_meta.web_search_queries:
                         final_grounding_metadata["queries"] = last_meta.web_search_queries
                     if final_grounding_metadata:
@@ -442,6 +474,86 @@ def run_chatbot_app():
                      st.session_state['uploaded_file_queue'] = []
                 if 'clipboard_queue' in st.session_state:
                      st.session_state['clipboard_queue'] = []
+
+                # --- 実行エンジンの統合 (モードONの場合) ---
+                auto_plot = st.session_state.get('auto_plot_enabled', False)
+                add_debug_log(f"[DEBUG] Auto Plot Enabled: {auto_plot}, Special Mode: {is_special_mode}")
+
+                if auto_plot and not is_special_mode:
+                    # コードブロックを抽出
+                    code_blocks = re.findall(r"```python\n(.*?)\n```", full_response, re.DOTALL)
+                    add_debug_log(f"[DEBUG] Found {len(code_blocks)} Python code blocks.") # DEBUG
+                    
+                    # グラフ描画やデータ分析に関連しそうなコードブロックを探す（後ろから優先）
+                    target_code = None
+                    for code in reversed(code_blocks):
+                        # 簡易判定: matplotlib, pandas, printなどが含まれているか
+                        if any(k in code for k in ["plt.", "fig", "matplotlib", "pd.", "print(", "dataframe"]):
+                            target_code = code
+                            break
+                    
+                    if target_code:
+                        add_debug_log(f"[DEBUG] Target code found (Length: {len(target_code)} chars). Executing...") # DEBUG
+                        with st.chat_message("assistant"):
+                            with st.status("⚙️ コードを実行中 (Execution Engine)...", expanded=True) as exec_status:
+                                
+                                stdout_str, figures = execution_engine.execute_user_code(
+                                    target_code,
+                                    available_files_map, # 今回のアップロード分
+                                    st.session_state['python_canvases']
+                                )
+                                
+                                add_debug_log(f"[DEBUG] Execution finished. Stdout len: {len(stdout_str)}, Figures: {len(figures)}") 
+
+                                # --- 修正: 画像をBase64変換し、メッセージとして保存・表示する ---
+                                images_b64 = []
+                                for fig_data in figures:
+                                    try:
+                                        # fig_data は BytesIO
+                                        b64_str = base64.b64encode(fig_data.getvalue()).decode('utf-8')
+                                        images_b64.append(b64_str)
+                                    except Exception as e:
+                                        add_debug_log(f"Image encode error: {e}", "error")
+
+                                # 一時的な表示（リラン前）
+                                if stdout_str:
+                                    st.caption("📄 標準出力:")
+                                    st.text(stdout_str)
+                                
+                                if images_b64:
+                                    st.caption(f"📊 生成されたグラフ ({len(images_b64)}枚):")
+                                    for img_b64 in images_b64:
+                                        st.image(base64.b64decode(img_b64), use_container_width=True)
+
+                                # 結果を履歴に追加
+                                if stdout_str or images_b64:
+                                    exec_result_msg = {
+                                        "role": "assistant",
+                                        "content": f"Running Code...\n\n```text\n{stdout_str}\n```" if stdout_str else "Running Code... (Graph Generated)",
+                                        "images": images_b64 
+                                    }
+                                    st.session_state['messages'].append(exec_result_msg)
+                                    
+                                    # 履歴更新のため自動保存
+                                    if st.session_state.get('auto_save_enabled', True):
+                                        current_file = st.session_state.get('current_chat_filename')
+                                        utils.save_auto_history(
+                                            st.session_state['messages'],
+                                            st.session_state['python_canvases'],
+                                            st.session_state['multi_code_enabled'],
+                                            client,
+                                            current_filename=current_file
+                                        )
+
+                                    exec_status.update(label="コード実行完了", state="complete")
+                                else:
+                                    exec_status.update(label="コード実行完了 (出力なし)", state="complete")
+                                    st.warning("グラフも標準出力も生成されませんでした。コード内で `print()` や `plt.plot()` が行われているか確認してください。")
+                    else:
+                         add_debug_log("[DEBUG] No suitable target code found (no plt/pd/print keywords).")
+                else:
+                    if not auto_plot:
+                         add_debug_log("[DEBUG] Execution skipped because Auto Plot is OFF.")
 
             except Exception as e:
                 st.error(f"Error during generation: {e}")

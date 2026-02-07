@@ -7,6 +7,11 @@ GCP_PROJECT_ID_NAME = "GCP_PROJECT_ID"
 GCP_LOCATION_NAME = "GCP_LOCATION"
 GEMINI_MODEL_ID_NAME = "GEMINI_MODEL_ID"
 
+# --- Code Execution Settings (New) ---
+# コード実行エンジンの設定
+EXECUTION_TIMEOUT = 30 # 秒
+TEMP_WORKSPACE_DIR = "temp_workspace"
+
 # --- Editor Settings ---
 ACE_EDITOR_SETTINGS = {
     "language": "python",
@@ -25,6 +30,7 @@ Your capabilities include:
 2. **Coding**: Writing, debugging, and explaining code in various languages.
 3. **Document Analysis**: Understanding and summarizing contents of PDFs, Word documents, PowerPoint presentations, and text files.
 4. **Image Understanding**: Analyzing images and diagrams.
+5. **Data Analysis**: Executing Python code to analyze data and visualize results.
 
 Always respond in a helpful, polite, and accurate manner.
 When dealing with code, provide clean, efficient, and well-commented solutions.
@@ -45,13 +51,19 @@ SESSION_STATE_DEFAULTS = {
     "debug_logs": [],
     "current_model_id": "gemini-3-pro-preview", # UIで切り替え可能にする
     "enable_google_search": False, # Grounding機能用フラグ
-    "uploaded_file_queue": [] # 送信待ちのファイルリスト
+    "uploaded_file_queue": [], # 送信待ちのファイルリスト
+    
+    # --- 新機能用ステート ---
+    "auto_plot_enabled": False, # グラフ描画・データ分析モード
+    "auto_save_enabled": True,  # 自動履歴保存
+    "clipboard_queue": [],      # クリップボード画像キュー
 }
 
 # 選択可能なモデルリスト
 AVAILABLE_MODELS = [
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
+    "gemini-2.0-flash-exp",
 ]
 
 # --- UI Texts ---
@@ -104,4 +116,3 @@ class UITexts:
     
     WEB_SEARCH_LABEL = "Web検索 (Grounding)"
     WEB_SEARCH_HELP = "Google検索を使用して回答を生成します。"
-    

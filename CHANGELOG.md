@@ -1,3 +1,12 @@
+## [0.2.0] - 2026-02-07  
+  
+### added  
+- data_manager.py  
+- execution_engine.py.py  
+- Text-to-Code-to-Gparh によるグラフ描画機能の実装  
+  
+---
+
 ## [0.1.6] - 2026-01-25  
   
 ### fixed  
