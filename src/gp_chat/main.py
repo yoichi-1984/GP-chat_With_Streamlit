@@ -361,6 +361,7 @@ def run_chatbot_app():
                         include_thoughts=True
                     )
 
+                # 初回生成
                 stream = client.models.generate_content_stream(
                     model=model_id,
                     contents=chat_contents,
@@ -480,22 +481,35 @@ def run_chatbot_app():
                 add_debug_log(f"[DEBUG] Auto Plot Enabled: {auto_plot}, Special Mode: {is_special_mode}")
 
                 if auto_plot and not is_special_mode:
-                    # コードブロックを抽出
-                    code_blocks = re.findall(r"```python\n(.*?)\n```", full_response, re.DOTALL)
-                    add_debug_log(f"[DEBUG] Found {len(code_blocks)} Python code blocks.") # DEBUG
                     
-                    # グラフ描画やデータ分析に関連しそうなコードブロックを探す（後ろから優先）
-                    target_code = None
-                    for code in reversed(code_blocks):
-                        # 簡易判定: matplotlib, pandas, printなどが含まれているか
-                        if any(k in code for k in ["plt.", "fig", "matplotlib", "pd.", "print(", "dataframe"]):
-                            target_code = code
-                            break
+                    # リトライ制御変数
+                    max_retries = 2
+                    retry_count = 0
                     
-                    if target_code:
-                        add_debug_log(f"[DEBUG] Target code found (Length: {len(target_code)} chars). Executing...") # DEBUG
+                    # 実行対象コードの初期化（初回は現在のレスポンスから抽出）
+                    current_response_text = full_response
+                    
+                    while retry_count <= max_retries:
+                        
+                        # コードブロックを抽出
+                        code_blocks = re.findall(r"```python\n(.*?)\n```", current_response_text, re.DOTALL)
+                        add_debug_log(f"[DEBUG] Retry:{retry_count} Found {len(code_blocks)} Python code blocks.") 
+                        
+                        target_code = None
+                        for code in reversed(code_blocks):
+                            if any(k in code for k in ["plt.", "fig", "matplotlib", "pd.", "print(", "dataframe"]):
+                                target_code = code
+                                break
+                        
+                        if not target_code:
+                            add_debug_log("[DEBUG] No suitable target code found (no plt/pd/print keywords).")
+                            break # コードがなければループ終了
+
+                        add_debug_log(f"[DEBUG] Retry:{retry_count} Executing code...") 
+                        
                         with st.chat_message("assistant"):
-                            with st.status("⚙️ コードを実行中 (Execution Engine)...", expanded=True) as exec_status:
+                            status_label = "⚙️ コードを実行中..." if retry_count == 0 else f"⚙️ コードを修正して再実行中 (Retry {retry_count})..."
+                            with st.status(status_label, expanded=True) as exec_status:
                                 
                                 stdout_str, figures = execution_engine.execute_user_code(
                                     target_code,
@@ -503,54 +517,121 @@ def run_chatbot_app():
                                     st.session_state['python_canvases']
                                 )
                                 
-                                add_debug_log(f"[DEBUG] Execution finished. Stdout len: {len(stdout_str)}, Figures: {len(figures)}") 
-
-                                # --- 修正: 画像をBase64変換し、メッセージとして保存・表示する ---
-                                images_b64 = []
-                                for fig_data in figures:
-                                    try:
-                                        # fig_data は BytesIO
-                                        b64_str = base64.b64encode(fig_data.getvalue()).decode('utf-8')
-                                        images_b64.append(b64_str)
-                                    except Exception as e:
-                                        add_debug_log(f"Image encode error: {e}", "error")
-
-                                # 一時的な表示（リラン前）
-                                if stdout_str:
-                                    st.caption("📄 標準出力:")
-                                    st.text(stdout_str)
-                                
-                                if images_b64:
-                                    st.caption(f"📊 生成されたグラフ ({len(images_b64)}枚):")
-                                    for img_b64 in images_b64:
-                                        st.image(base64.b64decode(img_b64), use_container_width=True)
-
-                                # 結果を履歴に追加
-                                if stdout_str or images_b64:
-                                    exec_result_msg = {
-                                        "role": "assistant",
-                                        "content": f"Running Code...\n\n```text\n{stdout_str}\n```" if stdout_str else "Running Code... (Graph Generated)",
-                                        "images": images_b64 
-                                    }
-                                    st.session_state['messages'].append(exec_result_msg)
-                                    
-                                    # 履歴更新のため自動保存
-                                    if st.session_state.get('auto_save_enabled', True):
-                                        current_file = st.session_state.get('current_chat_filename')
-                                        utils.save_auto_history(
-                                            st.session_state['messages'],
-                                            st.session_state['python_canvases'],
-                                            st.session_state['multi_code_enabled'],
-                                            client,
-                                            current_filename=current_file
-                                        )
-
-                                    exec_status.update(label="コード実行完了", state="complete")
+                                # --- エラー判定 (Tracebackが含まれているか) ---
+                                if "Traceback (most recent call last):" in stdout_str:
+                                    is_error = True
                                 else:
-                                    exec_status.update(label="コード実行完了 (出力なし)", state="complete")
-                                    st.warning("グラフも標準出力も生成されませんでした。コード内で `print()` や `plt.plot()` が行われているか確認してください。")
-                    else:
-                         add_debug_log("[DEBUG] No suitable target code found (no plt/pd/print keywords).")
+                                    is_error = False
+                                
+                                # --- 成功時 または リトライ上限到達時 ---
+                                if not is_error or retry_count >= max_retries:
+                                    
+                                    add_debug_log(f"[DEBUG] Execution finished (Error: {is_error}). Stdout len: {len(stdout_str)}, Figures: {len(figures)}") 
+
+                                    images_b64 = []
+                                    for fig_data in figures:
+                                        try:
+                                            b64_str = base64.b64encode(fig_data.getvalue()).decode('utf-8')
+                                            images_b64.append(b64_str)
+                                        except Exception as e:
+                                            add_debug_log(f"Image encode error: {e}", "error")
+
+                                    # 表示
+                                    if stdout_str:
+                                        st.caption("📄 標準出力:")
+                                        st.text(stdout_str)
+                                    
+                                    if images_b64:
+                                        st.caption(f"📊 生成されたグラフ ({len(images_b64)}枚):")
+                                        for img_b64 in images_b64:
+                                            st.image(base64.b64decode(img_b64), use_container_width=True)
+
+                                    # 保存
+                                    if stdout_str or images_b64:
+                                        content_text = f"Running Code...\n\n```text\n{stdout_str}\n```"
+                                        if is_error:
+                                            content_text = f"❌ Execution Failed (Retry limit reached):\n\n```text\n{stdout_str}\n```"
+                                        
+                                        exec_result_msg = {
+                                            "role": "assistant",
+                                            "content": content_text,
+                                            "images": images_b64 
+                                        }
+                                        st.session_state['messages'].append(exec_result_msg)
+                                        
+                                        # 自動保存
+                                        if st.session_state.get('auto_save_enabled', True):
+                                            current_file = st.session_state.get('current_chat_filename')
+                                            utils.save_auto_history(
+                                                st.session_state['messages'],
+                                                st.session_state['python_canvases'],
+                                                st.session_state['multi_code_enabled'],
+                                                client,
+                                                current_filename=current_file
+                                            )
+
+                                        if is_error:
+                                            exec_status.update(label="コード実行エラー (修正不能)", state="error")
+                                            st.error("AIによるコード自動修正が失敗しました。")
+                                        else:
+                                            exec_status.update(label="コード実行完了", state="complete")
+                                    else:
+                                        exec_status.update(label="コード実行完了 (出力なし)", state="complete")
+                                        st.warning("グラフも標準出力も生成されませんでした。")
+                                    
+                                    break # ループを抜ける (成功 or 諦め)
+
+                                # --- 失敗時 (リトライ実行) ---
+                                else:
+                                    # エラーを検知したので、AIにフィードバックして再生成させる
+                                    retry_count += 1
+                                    error_feedback = f"Code Execution Failed with Error:\n{stdout_str}\n\nPlease fix the code and output the corrected Python code block."
+                                    
+                                    st.warning(f"⚠️ コード実行エラーを検知しました。AIが修正を試みています... (Attempt {retry_count}/{max_retries})")
+                                    add_debug_log(f"[Auto-Fix] Requesting fix for error: {stdout_str[:100]}...")
+
+                                    # 履歴にエラー情報を追加（AIへの入力として）
+                                    # ユーザーには見せない内部的な追加にする手もあるが、今回は履歴に残す
+                                    st.session_state['messages'].append({"role": "system", "content": error_feedback})
+                                    
+                                    # 再生成リクエスト
+                                    # ※文脈（Context）を維持するため、現在の messages をそのまま使う
+                                    
+                                    fix_chat_contents = []
+                                    for m in st.session_state['messages']:
+                                        if m["role"] == "system":
+                                            continue 
+                                        parts = []
+                                        if "images" in m: # 過去の画像は無視するか、テキストのみ抽出
+                                             pass
+                                        
+                                        parts.append(types.Part.from_text(text=m["content"]))
+                                        fix_chat_contents.append(types.Content(role=m["role"], parts=parts))
+
+                                    # Generate Correction
+                                    try:
+                                        fix_response = client.models.generate_content(
+                                            model=model_id,
+                                            contents=fix_chat_contents,
+                                            config=gen_config # 同じ設定を使う
+                                        )
+                                        
+                                        # 修正後の回答テキストを取得
+                                        current_response_text = ""
+                                        if fix_response.candidates and fix_response.candidates[0].content.parts:
+                                            for part in fix_response.candidates[0].content.parts:
+                                                if part.text:
+                                                    current_response_text += part.text
+                                        
+                                        # 修正案を履歴に追加
+                                        st.session_state['messages'].append({"role": "assistant", "content": current_response_text})
+                                        
+                                        # 次のループへ（ここで抽出・実行される）
+
+                                    except Exception as e:
+                                        st.error(f"Auto-fix generation failed: {e}")
+                                        break # APIエラー等は諦める
+
                 else:
                     if not auto_plot:
                          add_debug_log("[DEBUG] Execution skipped because Auto Plot is OFF.")

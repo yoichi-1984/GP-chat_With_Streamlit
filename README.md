@@ -85,7 +85,7 @@ https://note.com/yoichi_1984xx/n/n3c95602b011c
 pyproject.tomlに従ってインストール。  
 pip install -e .  
 その後は  
-仮想環境で「codex-chat-gcp」と打ち込めば、内部的にstreamlit run で main_runner.py が実行される。  
+仮想環境で「gp-chat」と打ち込めば、内部的にstreamlit run で main_runner.py が実行される。  
   
 他には  
 python -m src.gp_chat.main_runner  
