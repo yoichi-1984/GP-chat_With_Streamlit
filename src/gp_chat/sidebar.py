@@ -1,4 +1,3 @@
-# sidebar.py:
 import streamlit as st
 import os
 import json
@@ -7,7 +6,12 @@ import io
 import datetime
 from PIL import ImageGrab, Image # クリップボード操作用
 from streamlit_ace import st_ace
-from . import config
+
+# --- Import Logic for Package vs Script execution ---
+try:
+    from . import config
+except ImportError:
+    import config
 
 # --- 擬似的なアップロードファイルクラス ---
 class VirtualUploadedFile:
@@ -101,7 +105,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.session_state['auto_plot_enabled'] = False
 
         st.checkbox(
-            label="📈 グラフ描画・データ分析（β機能）", 
+            label="📈 グラフ描画・データ分析", 
             key='auto_plot_enabled', 
             help="ONにすると、AIが生成したPythonコードを実行し、グラフ描画や計算結果を表示します。\nアップロードしたファイルは `files['name.csv']` でアクセス可能です。"
         )

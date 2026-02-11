@@ -1,4 +1,3 @@
-# utils.py :
 import os
 import sys
 import yaml
@@ -12,9 +11,14 @@ import re
 import datetime
 from importlib import resources
 import streamlit as st
-from . import config
 from google import genai
 from google.genai import types
+
+# --- Import Logic for Package vs Script execution ---
+try:
+    from . import config
+except ImportError:
+    import config
 
 # python-docxのインポート（Wordファイル用）
 try:
@@ -39,8 +43,14 @@ def load_prompts():
             yaml_data = yaml.safe_load(f)
             return yaml_data.get("prompts", {})
     except Exception as e:
-        print(f"Warning: prompts.yaml load failed: {e}")
-        return {}
+        # パッケージ化されていない場合(ローカル実行時)のフォールバック
+        try:
+            with open("prompts.yaml", "r", encoding="utf-8") as f:
+                yaml_data = yaml.safe_load(f)
+                return yaml_data.get("prompts", {})
+        except Exception as e2:
+            print(f"Warning: prompts.yaml load failed: {e}, {e2}")
+            return {}
 
 def find_env_files(directory="env"):
     """指定されたディレクトリ内の.envファイルを検索する"""
@@ -245,7 +255,12 @@ def load_app_config():
         with resources.open_text("gp_chat", "config.yaml") as f:
             return yaml.safe_load(f)
     except Exception:
-        return {}
+        # フォールバック: カレントディレクトリから
+        try:
+            with open("config.yaml", "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except:
+            return {}
 
 # --- 自動履歴保存機能用の新規関数 ---
 
