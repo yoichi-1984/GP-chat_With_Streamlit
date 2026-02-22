@@ -180,7 +180,7 @@ def run_chatbot_app():
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
-    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3-pro-preview"))
+    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.1-pro-preview"))
     
     INPUT_LIMIT = 1000000
     OUTPUT_LIMIT = 65536

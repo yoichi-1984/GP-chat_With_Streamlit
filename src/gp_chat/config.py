@@ -49,7 +49,7 @@ SESSION_STATE_DEFAULTS = {
     "canvas_key_counter": 0,
     "reasoning_effort": "high",
     "debug_logs": [],
-    "current_model_id": "gemini-3-pro-preview", # UIで切り替え可能にする
+    "current_model_id": "gemini-3.1-pro-preview", # UIで切り替え可能にする
     "enable_google_search": False, # Grounding機能用フラグ
     "uploaded_file_queue": [], # 送信待ちのファイルリスト
     
@@ -61,6 +61,7 @@ SESSION_STATE_DEFAULTS = {
 
 # 選択可能なモデルリスト
 AVAILABLE_MODELS = [
+    "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
     "gemini-2.0-flash-exp",

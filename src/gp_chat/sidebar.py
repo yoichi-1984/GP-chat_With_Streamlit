@@ -44,33 +44,55 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # --- 1. AIモデル選択エリア ---
         st.header("AIモデル選択")
         
-        st.selectbox(
+        # 状態保護のためのUIとステートの分離 (Selectbox)
+        env_idx = 0
+        curr_env = st.session_state.get('selected_env_file')
+        if curr_env in env_files:
+            env_idx = env_files.index(curr_env)
+            
+        sel_env = st.selectbox(
             label="Environment (.env)",
             options=env_files,
+            index=env_idx,
             format_func=lambda x: os.path.basename(x),
-            key='selected_env_file',
             disabled=st.session_state.get('is_generating', False)
         )
+        st.session_state['selected_env_file'] = sel_env
 
-        st.selectbox(
+        model_idx = 0
+        curr_model = st.session_state.get('current_model_id')
+        if curr_model in config.AVAILABLE_MODELS:
+            model_idx = config.AVAILABLE_MODELS.index(curr_model)
+
+        sel_model = st.selectbox(
             label="Target Model",
             options=config.AVAILABLE_MODELS,
-            key='current_model_id',
+            index=model_idx,
             help="Gemini 3 が 404 になる場合は 2.0 Flash 等で接続を確認してください。"
         )
+        st.session_state['current_model_id'] = sel_model
 
-        st.selectbox(
+        effort_options = ['high', 'low']
+        effort_idx = 0
+        curr_effort = st.session_state.get('reasoning_effort')
+        if curr_effort in effort_options:
+            effort_idx = effort_options.index(curr_effort)
+
+        sel_effort = st.selectbox(
             label="Thinking Level",
-            options=['high', 'low'],
-            key='reasoning_effort',
+            options=effort_options,
+            index=effort_idx,
             help="high: Maximum reasoning depth. low: Faster response."
         )
+        st.session_state['reasoning_effort'] = sel_effort
 
-        st.checkbox(
+        # 状態保護のためのUIとステートの分離 (Checkbox)
+        sel_search = st.checkbox(
             label=config.UITexts.WEB_SEARCH_LABEL,
-            key='enable_google_search',
+            value=st.session_state.get('enable_google_search', False),
             help=config.UITexts.WEB_SEARCH_HELP
         )
+        st.session_state['enable_google_search'] = sel_search
         
         st.divider()
 
@@ -104,11 +126,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         if 'auto_plot_enabled' not in st.session_state:
             st.session_state['auto_plot_enabled'] = False
 
-        st.checkbox(
+        sel_plot = st.checkbox(
             label="📈 グラフ描画・データ分析", 
-            key='auto_plot_enabled', 
+            value=st.session_state.get('auto_plot_enabled', False),
             help="ONにすると、AIが生成したPythonコードを実行し、グラフ描画や計算結果を表示します。\nアップロードしたファイルは `files['name.csv']` でアクセス可能です。"
         )
+        st.session_state['auto_plot_enabled'] = sel_plot
 
         # History Management
         st.subheader(config.UITexts.HISTORY_SUBHEADER)
@@ -117,7 +140,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         if 'auto_save_enabled' not in st.session_state:
             st.session_state['auto_save_enabled'] = True
             
-        st.checkbox("■ 自動履歴保存", key='auto_save_enabled', help="会話が2往復以上続くと、./chat_log フォルダに自動保存します。")
+        sel_save = st.checkbox(
+            "■ 自動履歴保存", 
+            value=st.session_state.get('auto_save_enabled', True),
+            help="会話が2往復以上続くと、./chat_log フォルダに自動保存します。"
+        )
+        st.session_state['auto_save_enabled'] = sel_save
         
         # --- ローカル保存された履歴からの再開 ---
         st.caption("📂 保存済み履歴から再開")
@@ -229,14 +257,26 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         # --- 4. コードエディタ (Canvas) エリア ---
         st.subheader(config.UITexts.EDITOR_SUBHEADER)
-        multi_code_enabled = st.checkbox(config.UITexts.MULTI_CODE_CHECKBOX, value=st.session_state['multi_code_enabled'])
-        if multi_code_enabled != st.session_state['multi_code_enabled']:
-            st.session_state['multi_code_enabled'] = multi_code_enabled
+        
+        # マルチコードチェックボックスも同様に保護
+        sel_multi = st.checkbox(
+            config.UITexts.MULTI_CODE_CHECKBOX, 
+            value=st.session_state.get('multi_code_enabled', False)
+        )
+        if sel_multi != st.session_state.get('multi_code_enabled'):
+            st.session_state['multi_code_enabled'] = sel_multi
             st.rerun()
+
+        def _local_handle_clear(idx):
+            # メイン処理（テキストを初期値に戻す）を実行
+            handle_clear(idx)
+            # keyカウンターを増やしてエディタを強制再描画
+            st.session_state['canvas_key_counter'] += 1
 
         canvases = st.session_state['python_canvases']
         if st.session_state['multi_code_enabled']:
-            if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True):
+            # 上部の追加ボタン
+            if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, key="add_canvas_top"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
                 st.rerun()
             
@@ -248,13 +288,19 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                     canvases[i] = updated
                 
                 c1, c2, c3 = st.columns(3)
-                c1.button("クリア", key=f"clr_{i}", on_click=handle_clear, args=(i,), use_container_width=True)
-                c2.button("レビュー", key=f"rev_{i}", on_click=handle_review, args=(i, True), use_container_width=True)
-                c3.button("検証", key=f"val_{i}", on_click=handle_validation, args=(i,), use_container_width=True)
+                c1.button(config.UITexts.CLEAR_BUTTON, key=f"clr_{i}", on_click=_local_handle_clear, args=(i,), use_container_width=True)
+                c2.button(config.UITexts.REVIEW_BUTTON, key=f"rev_{i}", on_click=handle_review, args=(i, True), use_container_width=True)
+                c3.button(config.UITexts.VALIDATE_BUTTON, key=f"val_{i}", on_click=handle_validation, args=(i,), use_container_width=True)
 
                 up_key = f"up_{i}_{st.session_state['canvas_key_counter']}"
                 st.file_uploader(f"Load into Canvas-{i+1}", type=supported_types, key=up_key, on_change=handle_file_upload, args=(i, up_key))
                 st.divider()
+
+            # 下部の追加ボタン
+            if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, key="add_canvas_bottom"):
+                canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
+                st.rerun()
+                
         else:
             if len(canvases) > 1:
                 st.session_state['python_canvases'] = [canvases[0]]
@@ -266,9 +312,9 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 canvases[0] = updated
 
             c1, c2, c3 = st.columns(3)
-            c1.button("Clear", key="clr_s", on_click=handle_clear, args=(0,), use_container_width=True)
-            c2.button("Review", key="rev_s", on_click=handle_review, args=(0, False), use_container_width=True)
-            c3.button("Validate", key="val_s", on_click=handle_validation, args=(0,), use_container_width=True)
+            c1.button(config.UITexts.CLEAR_BUTTON, key="clr_s", on_click=_local_handle_clear, args=(0,), use_container_width=True)
+            c2.button(config.UITexts.REVIEW_BUTTON, key="rev_s", on_click=handle_review, args=(0, False), use_container_width=True)
+            c3.button(config.UITexts.VALIDATE_BUTTON, key="val_s", on_click=handle_validation, args=(0,), use_container_width=True)
             
             up_key = f"up_s_{st.session_state['canvas_key_counter']}"
             st.file_uploader("Load into Canvas", type=supported_types, key=up_key, on_change=handle_file_upload, args=(0, up_key))
@@ -284,4 +330,3 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             """,
             unsafe_allow_html=True
         )
-        
