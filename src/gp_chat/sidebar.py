@@ -29,7 +29,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
     """Renders the sidebar with Gemini 3 specific options and model selector."""
     with st.sidebar:
         # --- CSS Style Injection ---
-        # ファイルアップローダーの「Limit 200MB...」などの補足テキストを非表示にしてスッキリさせる
         st.markdown(
             """
             <style>
@@ -41,10 +40,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             unsafe_allow_html=True
         )
 
+        # カウンターを取得（この数字が変わることで、UIのキャッシュが破棄される）
+        c_key = st.session_state.get('canvas_key_counter', 0)
+
         # --- 1. AIモデル選択エリア ---
         st.header("AIモデル選択")
         
-        # 状態保護のためのUIとステートの分離 (Selectbox)
         env_idx = 0
         curr_env = st.session_state.get('selected_env_file')
         if curr_env in env_files:
@@ -55,9 +56,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             options=env_files,
             index=env_idx,
             format_func=lambda x: os.path.basename(x),
-            disabled=st.session_state.get('is_generating', False)
+            disabled=st.session_state.get('is_generating', False),
+            key=f"env_sel_{c_key}" # カウンター付きキー
         )
-        st.session_state['selected_env_file'] = sel_env
+        if sel_env != st.session_state.get('selected_env_file'):
+            st.session_state['selected_env_file'] = sel_env
+            st.rerun()
 
         model_idx = 0
         curr_model = st.session_state.get('current_model_id')
@@ -68,31 +72,62 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             label="Target Model",
             options=config.AVAILABLE_MODELS,
             index=model_idx,
-            help="Gemini 3 が 404 になる場合は 2.0 Flash 等で接続を確認してください。"
+            help="Gemini 3 が 404 になる場合は 2.0 Flash 等で接続を確認してください。",
+            key=f"model_sel_{c_key}" # カウンター付きキー
         )
-        st.session_state['current_model_id'] = sel_model
+        if sel_model != st.session_state.get('current_model_id'):
+            st.session_state['current_model_id'] = sel_model
+            st.rerun()
+
+        # --- More Research Mode と UI連動・ロック機構 ---
+        is_more_research = st.session_state.get('enable_more_research', False)
 
         effort_options = ['high', 'low']
-        effort_idx = 0
-        curr_effort = st.session_state.get('reasoning_effort')
-        if curr_effort in effort_options:
-            effort_idx = effort_options.index(curr_effort)
+        # More Research ON時は強制的に 'high' に見せる
+        curr_effort = 'high' if is_more_research else st.session_state.get('reasoning_effort', 'high')
+        effort_idx = effort_options.index(curr_effort) if curr_effort in effort_options else 0
 
         sel_effort = st.selectbox(
             label="Thinking Level",
             options=effort_options,
             index=effort_idx,
-            help="high: Maximum reasoning depth. low: Faster response."
+            disabled=is_more_research, # More Research ONならロック
+            help="high: Maximum reasoning depth. low: Faster response." + (" (Locked to 'high' in More Research Mode)" if is_more_research else ""),
+            key=f"effort_sel_{c_key}" # カウンター付きキー
         )
-        st.session_state['reasoning_effort'] = sel_effort
+        if not is_more_research and sel_effort != st.session_state.get('reasoning_effort', 'high'):
+            st.session_state['reasoning_effort'] = sel_effort
+            st.rerun()
 
-        # 状態保護のためのUIとステートの分離 (Checkbox)
+        # More Research ON時は強制的にチェックを入れる
+        curr_search = True if is_more_research else st.session_state.get('enable_google_search', False)
         sel_search = st.checkbox(
             label=config.UITexts.WEB_SEARCH_LABEL,
-            value=st.session_state.get('enable_google_search', False),
-            help=config.UITexts.WEB_SEARCH_HELP
+            value=curr_search,
+            disabled=is_more_research, # More Research ONならロック
+            help=config.UITexts.WEB_SEARCH_HELP + (" (Forced ON in More Research Mode)" if is_more_research else ""),
+            key=f"search_chk_{c_key}" # カウンター付きキー
         )
-        st.session_state['enable_google_search'] = sel_search
+        if not is_more_research and sel_search != st.session_state.get('enable_google_search', False):
+            st.session_state['enable_google_search'] = sel_search
+            st.rerun()
+
+        # More Research Mode スイッチ
+        sel_more_research = st.checkbox(
+            label=config.UITexts.MORE_RESEARCH_LABEL,
+            value=is_more_research,
+            help=config.UITexts.MORE_RESEARCH_HELP,
+            key=f"more_res_chk_{c_key}" # カウンター付きキー
+        )
+        
+        # 値が変わった瞬間に画面を再描画して、上のロック状態を即座に反映させる
+        if sel_more_research != is_more_research:
+            st.session_state['enable_more_research'] = sel_more_research
+            # 連動するステータスもここで一気に書き換える
+            if sel_more_research:
+                st.session_state['reasoning_effort'] = 'high'
+                st.session_state['enable_google_search'] = True
+            st.rerun()
         
         st.divider()
 
@@ -129,9 +164,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         sel_plot = st.checkbox(
             label="📈 グラフ描画・データ分析", 
             value=st.session_state.get('auto_plot_enabled', False),
-            help="ONにすると、AIが生成したPythonコードを実行し、グラフ描画や計算結果を表示します。\nアップロードしたファイルは `files['name.csv']` でアクセス可能です。"
+            help="ONにすると、AIが生成したPythonコードを実行し、グラフ描画や計算結果を表示します。\nアップロードしたファイルは `files['name.csv']` でアクセス可能です。",
+            key=f"plot_chk_{c_key}" # カウンター付きキー
         )
-        st.session_state['auto_plot_enabled'] = sel_plot
+        if sel_plot != st.session_state.get('auto_plot_enabled'):
+            st.session_state['auto_plot_enabled'] = sel_plot
+            st.rerun()
 
         # History Management
         st.subheader(config.UITexts.HISTORY_SUBHEADER)
@@ -143,9 +181,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         sel_save = st.checkbox(
             "■ 自動履歴保存", 
             value=st.session_state.get('auto_save_enabled', True),
-            help="会話が2往復以上続くと、./chat_log フォルダに自動保存します。"
+            help="会話が2往復以上続くと、./chat_log フォルダに自動保存します。",
+            key=f"save_chk_{c_key}" # カウンター付きキー
         )
-        st.session_state['auto_save_enabled'] = sel_save
+        if sel_save != st.session_state.get('auto_save_enabled'):
+            st.session_state['auto_save_enabled'] = sel_save
+            st.rerun()
         
         # --- ローカル保存された履歴からの再開 ---
         st.caption("📂 保存済み履歴から再開")
@@ -157,8 +198,13 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             
             if log_files:
                 selected_log = st.selectbox("履歴ファイルを選択", options=log_files, key="local_history_selector", label_visibility="collapsed")
-                if st.button("読み込む", key="load_local_history_btn", use_container_width=True):
-                    load_local_history(selected_log)
+                st.button(
+                    "読み込む", 
+                    key="load_local_history_btn", 
+                    use_container_width=True, 
+                    on_click=load_local_history, 
+                    args=(selected_log,)
+                )
             else:
                 st.caption("（履歴ファイルはありません）")
         else:
@@ -172,7 +218,11 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             history_data = {
                 "messages": st.session_state['messages'],
                 "python_canvases": st.session_state['python_canvases'],
-                "multi_code_enabled": st.session_state['multi_code_enabled']
+                "multi_code_enabled": st.session_state.get('multi_code_enabled', False),
+                "enable_more_research": st.session_state.get('enable_more_research', False),
+                "enable_google_search": st.session_state.get('enable_google_search', False),
+                "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
+                "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False)
             }
             st.download_button(
                 label=config.UITexts.DOWNLOAD_HISTORY_BUTTON,
@@ -182,7 +232,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 use_container_width=True
             )
 
-        history_uploader_key = f"history_uploader_{st.session_state['canvas_key_counter']}"
+        history_uploader_key = f"history_uploader_{c_key}"
         st.file_uploader(label=config.UITexts.UPLOAD_HISTORY_LABEL, type="json", key=history_uploader_key, on_change=load_history, args=(history_uploader_key,), label_visibility="collapsed")
 
         st.divider()
@@ -261,7 +311,8 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # マルチコードチェックボックスも同様に保護
         sel_multi = st.checkbox(
             config.UITexts.MULTI_CODE_CHECKBOX, 
-            value=st.session_state.get('multi_code_enabled', False)
+            value=st.session_state.get('multi_code_enabled', False),
+            key=f"multi_chk_{c_key}" # カウンター付きキー
         )
         if sel_multi != st.session_state.get('multi_code_enabled'):
             st.session_state['multi_code_enabled'] = sel_multi
@@ -274,7 +325,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.session_state['canvas_key_counter'] += 1
 
         canvases = st.session_state['python_canvases']
-        if st.session_state['multi_code_enabled']:
+        if st.session_state.get('multi_code_enabled', False):
             # 上部の追加ボタン
             if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, key="add_canvas_top"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)

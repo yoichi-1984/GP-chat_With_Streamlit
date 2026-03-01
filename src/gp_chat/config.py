@@ -1,4 +1,3 @@
-# config.py:
 # --- Constants ---
 MAX_CANVASES = 40
 
@@ -49,8 +48,9 @@ SESSION_STATE_DEFAULTS = {
     "canvas_key_counter": 0,
     "reasoning_effort": "high",
     "debug_logs": [],
-    "current_model_id": "gemini-3.1-pro-preview", # UIで切り替え可能にする
+    "current_model_id": "gemini-3-pro-preview", # UIで切り替え可能にする
     "enable_google_search": False, # Grounding機能用フラグ
+    "enable_more_research": False, # 深掘り調査モード用フラグ
     "uploaded_file_queue": [], # 送信待ちのファイルリスト
     
     # --- 新機能用ステート ---
@@ -61,7 +61,6 @@ SESSION_STATE_DEFAULTS = {
 
 # 選択可能なモデルリスト
 AVAILABLE_MODELS = [
-    "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
     "gemini-2.0-flash-exp",
@@ -117,3 +116,7 @@ class UITexts:
     
     WEB_SEARCH_LABEL = "Web検索 (Grounding)"
     WEB_SEARCH_HELP = "Google検索を使用して回答を生成します。"
+    
+    # --- 新規追加 ---
+    MORE_RESEARCH_LABEL = "徹底調査モード (More Research)"
+    MORE_RESEARCH_HELP = "AIに複数回のWeb検索と自問自答を強制し、情報の正確性を高めます。回答に時間がかかります。"

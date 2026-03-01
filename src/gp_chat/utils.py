@@ -367,11 +367,15 @@ def save_auto_history(messages, canvases, multi_code_enabled, client, current_fi
         filename = get_unique_filename(log_dir, base_filename)
         current_filename = filename
     
-    # 保存データ構築
+    # --- 変更: 履歴保存時のデータに設定フラグを追加 ---
     history_data = {
         "messages": messages,
         "python_canvases": canvases,
         "multi_code_enabled": multi_code_enabled,
+        "enable_more_research": st.session_state.get('enable_more_research', False),
+        "enable_google_search": st.session_state.get('enable_google_search', False),
+        "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
+        "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
         "saved_at": datetime.datetime.now().isoformat()
     }
     
@@ -384,4 +388,3 @@ def save_auto_history(messages, canvases, multi_code_enabled, client, current_fi
     except Exception as e:
         print(f"Auto-save failed: {e}")
         return current_filename
-    

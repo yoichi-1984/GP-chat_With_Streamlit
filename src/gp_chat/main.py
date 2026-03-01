@@ -54,6 +54,16 @@ def load_history(uploader_key):
             if "multi_code_enabled" in loaded_data:
                 st.session_state['multi_code_enabled'] = loaded_data["multi_code_enabled"]
 
+            # --- 変更: 保存された各種設定フラグを復元 ---
+            if "enable_more_research" in loaded_data:
+                st.session_state['enable_more_research'] = loaded_data["enable_more_research"]
+            if "enable_google_search" in loaded_data:
+                st.session_state['enable_google_search'] = loaded_data["enable_google_search"]
+            if "reasoning_effort" in loaded_data:
+                st.session_state['reasoning_effort'] = loaded_data["reasoning_effort"]
+            if "auto_plot_enabled" in loaded_data:
+                st.session_state['auto_plot_enabled'] = loaded_data["auto_plot_enabled"]
+
             st.success(config.UITexts.HISTORY_LOADED_SUCCESS)
             st.session_state['system_role_defined'] = True
             st.session_state['canvas_key_counter'] += 1
@@ -85,6 +95,16 @@ def load_history_from_local(filename):
             
             if "multi_code_enabled" in loaded_data:
                 st.session_state['multi_code_enabled'] = loaded_data["multi_code_enabled"]
+
+            # --- 変更: 保存された各種設定フラグを復元 ---
+            if "enable_more_research" in loaded_data:
+                st.session_state['enable_more_research'] = loaded_data["enable_more_research"]
+            if "enable_google_search" in loaded_data:
+                st.session_state['enable_google_search'] = loaded_data["enable_google_search"]
+            if "reasoning_effort" in loaded_data:
+                st.session_state['reasoning_effort'] = loaded_data["reasoning_effort"]
+            if "auto_plot_enabled" in loaded_data:
+                st.session_state['auto_plot_enabled'] = loaded_data["auto_plot_enabled"]
 
             st.success(f"Loaded: {filename}")
             st.session_state['system_role_defined'] = True
@@ -142,11 +162,6 @@ def run_chatbot_app():
         if key not in st.session_state:
             st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
 
-    # 中断リカバリーチェック
-    if st.session_state.get('messages') and st.session_state['messages'][-1]['role'] == 'user' and not st.session_state.get('is_generating'):
-        recover_interrupted_session()
-        st.rerun()
-
     # --- 機能改善: Canvas読み込み時の文字コード対応関数 ---
     def handle_canvas_upload(index, key):
         uploaded_file = st.session_state.get(key)
@@ -174,13 +189,18 @@ def run_chatbot_app():
         lambda i: utils.run_pylint_validation(st.session_state['python_canvases'][i], i, PROMPTS),
         handle_canvas_upload 
     )
+
+    # --- 修正: 中断リカバリーチェックをサイドバー描画の「後」に移動 ---
+    if st.session_state.get('messages') and st.session_state['messages'][-1]['role'] == 'user' and not st.session_state.get('is_generating'):
+        recover_interrupted_session()
+        st.rerun()
     
     # --- .env ロードと Client 初期化 ---
     load_dotenv(dotenv_path=st.session_state.get('selected_env_file', env_files[0]), override=True)
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
-    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.1-pro-preview"))
+    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3-pro-preview"))
     
     INPUT_LIMIT = 1000000
     OUTPUT_LIMIT = 65536
@@ -296,6 +316,9 @@ def run_chatbot_app():
             else:
                 target_messages = st.session_state['messages']
 
+            # --- 新規追加: More Research Mode の判定 ---
+            is_more_research = st.session_state.get('enable_more_research', False) and not is_special_mode
+
             chat_contents = []
             system_instruction = ""
             for m in target_messages:
@@ -303,6 +326,13 @@ def run_chatbot_app():
                     system_instruction = m["content"]
                 else:
                     chat_contents.append(types.Content(role=m["role"], parts=[types.Part.from_text(text=m["content"])]))
+            
+            # --- 新規追加: More Research Mode 時の裏プロンプト注入 ---
+            if is_more_research:
+                more_research_prompt = PROMPTS.get("more_research", {}).get("text", "")
+                if more_research_prompt:
+                    system_instruction += f"\n\n{more_research_prompt}"
+                    add_debug_log("More Research Mode Active: Injected strict search directives.")
             
             file_attachments_meta = []
             queue_files = st.session_state.get('uploaded_file_queue', []) + st.session_state.get('clipboard_queue', [])
@@ -340,11 +370,22 @@ def run_chatbot_app():
                     chat_contents[-1].parts = context_parts + chat_contents[-1].parts
 
             effort = st.session_state.get('reasoning_effort', 'high')
-            t_level = types.ThinkingLevel.HIGH if effort == 'high' else types.ThinkingLevel.LOW
+            
+            # --- 変更: More Research Mode なら強制的に Thinking Level を HIGH にする ---
+            if is_more_research:
+                t_level = types.ThinkingLevel.HIGH
+            else:
+                t_level = types.ThinkingLevel.HIGH if effort == 'high' else types.ThinkingLevel.LOW
 
             tools_config = []
-            if st.session_state.get('enable_google_search', False) and not is_special_mode:
-                add_debug_log("Google Search Tool Enabled.")
+            enable_search = st.session_state.get('enable_google_search', False)
+            
+            # --- 変更: More Research Mode なら強制的に Web検索を有効にする ---
+            if (enable_search or is_more_research) and not is_special_mode:
+                msg = "Google Search Tool Enabled"
+                if is_more_research and not enable_search:
+                    msg += " (Forced by More Research Mode)."
+                add_debug_log(msg)
                 tools_config = [types.Tool(google_search=types.GoogleSearch())]
 
             try:
@@ -645,4 +686,3 @@ def run_chatbot_app():
 
 if __name__ == "__main__":
     run_chatbot_app()
-    
