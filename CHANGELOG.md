@@ -1,3 +1,16 @@
+## [0.2.6] - 2026-03-01  
+  
+### added  
+- state_manager.py  
+- research_agent.py  
+- code_agent.py  
+- More researchにAgent機能を付与  
+  
+### fixed  
+- main.pyのリファクタリングを実施  
+  
+---
+  
 ## [0.2.5] - 2026-03-01  
   
 ### added  
