@@ -82,7 +82,8 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # --- More Research Mode と UI連動・ロック機構 ---
         is_more_research = st.session_state.get('enable_more_research', False)
 
-        effort_options = ['high', 'low']
+        # 追加: 'deep' を選択肢に追加
+        effort_options = ['high', 'low', 'deep']
         # More Research ON時は強制的に 'high' に見せる
         curr_effort = 'high' if is_more_research else st.session_state.get('reasoning_effort', 'high')
         effort_idx = effort_options.index(curr_effort) if curr_effort in effort_options else 0
@@ -92,19 +93,25 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             options=effort_options,
             index=effort_idx,
             disabled=is_more_research, # More Research ONならロック
-            help="high: Maximum reasoning depth. low: Faster response." + (" (Locked to 'high' in More Research Mode)" if is_more_research else ""),
+            help="high: 標準の推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research Mode)" if is_more_research else ""),
             key=f"effort_sel_{c_key}" # カウンター付きキー
         )
         if not is_more_research and sel_effort != st.session_state.get('reasoning_effort', 'high'):
             st.session_state['reasoning_effort'] = sel_effort
             st.rerun()
 
+        is_deep_reasoning = st.session_state.get('reasoning_effort') == 'deep'
+        
         # More Research ON時は強制的にチェックを入れる
-        curr_search = True if is_more_research else st.session_state.get('enable_google_search', False)
+        # Deep Reasoning時はユーザーが自由にON/OFF可能とするため連動やロックを解除
+        curr_search = st.session_state.get('enable_google_search', False)
+        if is_more_research:
+            curr_search = True
+
         sel_search = st.checkbox(
             label=config.UITexts.WEB_SEARCH_LABEL,
             value=curr_search,
-            disabled=is_more_research, # More Research ONならロック
+            disabled=is_more_research, # More Research ONならロック（Deep Reasoningではロックしない）
             help=config.UITexts.WEB_SEARCH_HELP + (" (Forced ON in More Research Mode)" if is_more_research else ""),
             key=f"search_chk_{c_key}" # カウンター付きキー
         )
@@ -116,6 +123,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         sel_more_research = st.checkbox(
             label=config.UITexts.MORE_RESEARCH_LABEL,
             value=is_more_research,
+            disabled=is_deep_reasoning, # Deep Reasoning中は排他ロック
             help=config.UITexts.MORE_RESEARCH_HELP,
             key=f"more_res_chk_{c_key}" # カウンター付きキー
         )
@@ -198,11 +206,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             
             if log_files:
                 selected_log = st.selectbox("履歴ファイルを選択", options=log_files, key="local_history_selector", label_visibility="collapsed")
+                # 修正: on_click コールバックを使用して、UI描画前にステートを更新する
                 st.button(
                     "読み込む", 
                     key="load_local_history_btn", 
-                    use_container_width=True, 
-                    on_click=load_local_history, 
+                    use_container_width=True,
+                    on_click=load_local_history,
                     args=(selected_log,)
                 )
             else:
@@ -374,7 +383,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.2.6</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.2.7</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>

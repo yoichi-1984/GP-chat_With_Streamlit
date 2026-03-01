@@ -1,3 +1,11 @@
+## [0.2.7] - 2026-03-01  
+  
+### added  
+- reasoning_agent.py  
+- thinking level にdeepを追加し、deep reasoning modeを付与  
+  
+---
+
 ## [0.2.6] - 2026-03-01  
   
 ### added  

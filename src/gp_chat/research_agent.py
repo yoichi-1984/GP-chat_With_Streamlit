@@ -13,167 +13,183 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
                       text_placeholder, thought_status, thought_placeholder):
     """
     徹底調査モード (More Research) 用のエージェント。
-    1. Planning: 検索クエリの立案
-    2. Execution: 各クエリでの並列/直列検索の実行
-    3. Synthesis: 情報の統合と最終回答のストリーミング生成
+    1. Dynamic Research: 情報の過不足を評価しながら、動的な検索ループ(ReAct)を実行
+    2. Synthesis: 収集した全情報と推論ルールを用いて最終回答を生成
     
     Returns:
         tuple: (full_response, usage_metadata, combined_grounding_metadata)
     """
-    state_manager.add_debug_log("[Deep Research] Starting agent...")
+    state_manager.add_debug_log("[Deep Research] Starting dynamic ReAct agent...")
     
     total_usage = {"input": 0, "output": 0, "total": 0}
     combined_grounding = {"sources": [], "queries": []}
     full_thought_log = "### 🧠 Deep Research Process\n\n"
     
     # ---------------------------------------------------------
-    # Phase 1: Planning (クエリの立案)
+    # Phase 1: Dynamic Research Loop (ReAct型深掘り)
     # ---------------------------------------------------------
-    thought_status.update(label="📋 調査計画を立案中 (Planning)...", state="running")
-    full_thought_log += "**[Phase 1: Planning]**\n質問を分析し、必要な検索クエリを生成しています...\n"
+    full_thought_log += "**[Phase 1: Dynamic Research]**\n情報の過不足を評価しながら、動的に検索と深掘りを繰り返します...\n"
     thought_placeholder.markdown(full_thought_log)
     
-    plan_prompt = (
-        "あなたは優秀なリサーチャーです。ユーザーの最新の要求に対して、完璧な裏付けのある回答を作成するために、"
-        "Google検索で調査すべき具体的なクエリを3〜5個作成してください。\n"
-        "多角的な視点（最新動向、技術仕様、事例など）を含めるようにしてください。\n"
-    )
-    
-    # Planning用のメッセージ構築（直近のやり取りのみを考慮してトークン節約）
-    plan_contents = chat_contents[-3:] if len(chat_contents) > 3 else chat_contents
-    plan_contents = plan_contents + [types.Content(role="user", parts=[types.Part.from_text(text=plan_prompt)])]
-    
-    # JSONスキーマの定義 (確実にリストで受け取るため)
-    response_schema = {
-        "type": "OBJECT",
-        "properties": {
-            "queries": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"}
-            }
-        },
-        "required": ["queries"]
-    }
-    
-    plan_config = types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=response_schema,
-        temperature=0.2, # クエリ生成は決定論的に
-    )
-    
-    search_queries = []
-    try:
-        plan_response = client.models.generate_content(
-            model=model_id,
-            contents=plan_contents,
-            config=plan_config
-        )
-        
-        # 修正: or 0 を付与して None によるクラッシュを防止
-        if plan_response.usage_metadata:
-            total_usage["input"] += (plan_response.usage_metadata.prompt_token_count or 0)
-            total_usage["output"] += (plan_response.usage_metadata.candidates_token_count or 0)
-            
-        plan_data = json.loads(plan_response.text)
-        search_queries = plan_data.get("queries", [])
-        
-        full_thought_log += f"立案されたクエリ: {', '.join(search_queries)}\n\n"
-        thought_placeholder.markdown(full_thought_log)
-        state_manager.add_debug_log(f"[Deep Research] Planned queries: {search_queries}")
-        
-    except Exception as e:
-        state_manager.add_debug_log(f"[Deep Research] Planning failed: {e}", "error")
-        search_queries = ["現在の最新情報"] # フェイルセーフ
-        full_thought_log += f"⚠️ 計画立案に失敗しました。デフォルトのクエリで進行します。\n\n"
-
-
-    # ---------------------------------------------------------
-    # Phase 2: Execution (リサーチの実行)
-    # ---------------------------------------------------------
-    full_thought_log += "**[Phase 2: Execution]**\n各クエリについて詳細な調査を実行します...\n"
-    thought_placeholder.markdown(full_thought_log)
-    
+    MAX_ITERATIONS = 3
+    iteration = 0
     research_results = []
+    executed_queries = set()
     
-    # 検索用の設定 (Google Searchツールを強制有効化)
+    # 評価・計画用のJSONスキーマ
+    react_config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema={
+            "type": "OBJECT",
+            "properties": {
+                "status": {"type": "STRING", "description": "'needs_more_info' or 'sufficient'"},
+                "next_queries": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "reasoning": {"type": "STRING", "description": "現在の状況と次のアクション(検索)を決定した理由"}
+            },
+            "required": ["status", "next_queries", "reasoning"]
+        },
+        temperature=0.2,
+    )
+    
+    # 検索実行用のコンフィグ
     exec_config = types.GenerateContentConfig(
         temperature=0.1,
         tools=[types.Tool(google_search=types.GoogleSearch())]
     )
-    
-    for i, query in enumerate(search_queries):
-        thought_status.update(label=f"🔍 調査中: {query} ({i+1}/{len(search_queries)})...", state="running")
-        full_thought_log += f"* 🔍 検索実行: `{query}`\n"
-        thought_placeholder.markdown(full_thought_log)
+
+    while iteration < MAX_ITERATIONS:
+        iteration += 1
+        thought_status.update(label=f"🔄 調査サイクル {iteration}/{MAX_ITERATIONS} を実行中...", state="running")
         
-        exec_prompt = f"以下のクエリでGoogle検索を行い、判明した重要な事実、データ、見解を詳細に要約してリストアップしてください。\nクエリ: {query}"
+        # --- 評価・計画 ---
+        current_knowledge = "\n\n".join(research_results) if research_results else "（まだ調査結果はありません）"
+        
+        react_prompt = (
+            "あなたは優秀なリサーチャーです。ユーザーの最新の要求に対して、完璧な裏付けのある回答を作成するための情報を集めています。\n"
+            "これまでに以下の調査結果が得られています：\n"
+            "-----------------\n"
+            f"{current_knowledge}\n"
+            "-----------------\n"
+            "【あなたのタスク】\n"
+            "上記の情報を踏まえ、ユーザーの要求に完全に答えるために情報が十分か判定してください。\n"
+            "もし情報が不足している、事実の裏付けが弱い、または新たに深掘りすべき疑問点が浮上した場合は、"
+            "それを解決するためのGoogle検索クエリを1〜3個提案してください。\n"
+            "情報が十分に揃ったと判断した場合は、statusを'sufficient'にし、next_queriesは空にしてください。\n"
+        )
+        
+        # 直近のやり取りを元にメッセージ構築
+        react_contents = chat_contents[-3:] if len(chat_contents) > 3 else chat_contents
+        react_contents = react_contents + [types.Content(role="user", parts=[types.Part.from_text(text=react_prompt)])]
         
         try:
-            exec_response = client.models.generate_content(
+            react_response = client.models.generate_content(
                 model=model_id,
-                contents=[types.Content(role="user", parts=[types.Part.from_text(text=exec_prompt)])],
-                config=exec_config
+                contents=react_contents,
+                config=react_config
             )
+            if react_response.usage_metadata:
+                total_usage["input"] += (react_response.usage_metadata.prompt_token_count or 0)
+                total_usage["output"] += (react_response.usage_metadata.candidates_token_count or 0)
+                
+            react_data = json.loads(react_response.text)
+            status = react_data.get("status", "needs_more_info")
+            next_queries = react_data.get("next_queries", [])
+            reasoning = react_data.get("reasoning", "")
             
-            # 修正: or 0 を付与
-            if exec_response.usage_metadata:
-                total_usage["input"] += (exec_response.usage_metadata.prompt_token_count or 0)
-                total_usage["output"] += (exec_response.usage_metadata.candidates_token_count or 0)
+            # AIの判断理由をUIに表示
+            full_thought_log += f"\n**[Cycle {iteration}] AIの思考:** {reasoning}\n"
+            thought_placeholder.markdown(full_thought_log)
+            state_manager.add_debug_log(f"[Deep Research] Cycle {iteration} reasoning: {reasoning}")
             
-            # Grounding情報の収集
-            if exec_response.candidates and exec_response.candidates[0].grounding_metadata:
-                g_meta = exec_response.candidates[0].grounding_metadata
-                if g_meta.web_search_queries:
-                    combined_grounding["queries"].extend(g_meta.web_search_queries)
-                if g_meta.grounding_chunks:
-                    for chunk in g_meta.grounding_chunks:
-                        if chunk.web:
-                            # 重複排除しながら追加
-                            if not any(s['uri'] == chunk.web.uri for s in combined_grounding["sources"]):
-                                combined_grounding["sources"].append({"title": chunk.web.title, "uri": chunk.web.uri})
+            # 終了判定
+            if status == "sufficient" or not next_queries:
+                full_thought_log += "✅ 情報が十分に揃ったと判断しました。調査ループを終了します。\n"
+                thought_placeholder.markdown(full_thought_log)
+                break
+                
+            # --- 検索の実行 ---
+            # 過去に実行したクエリはスキップし、最大3個までに制限
+            queries_to_run = [q for q in next_queries if q not in executed_queries][:3]
+            if not queries_to_run:
+                full_thought_log += "⚠️ 新しい検索クエリがありません。調査ループを終了します。\n"
+                thought_placeholder.markdown(full_thought_log)
+                break
+                
+            for query in queries_to_run:
+                executed_queries.add(query)
+                full_thought_log += f"* 🔍 検索実行: `{query}`\n"
+                thought_placeholder.markdown(full_thought_log)
+                
+                exec_prompt = f"以下のクエリでGoogle検索を行い、判明した重要な事実、データ、見解を詳細に要約してリストアップしてください。\nクエリ: {query}"
+                exec_response = client.models.generate_content(
+                    model=model_id,
+                    contents=[types.Content(role="user", parts=[types.Part.from_text(text=exec_prompt)])],
+                    config=exec_config
+                )
+                
+                if exec_response.usage_metadata:
+                    total_usage["input"] += (exec_response.usage_metadata.prompt_token_count or 0)
+                    total_usage["output"] += (exec_response.usage_metadata.candidates_token_count or 0)
+                
+                # Grounding情報の収集
+                if exec_response.candidates and exec_response.candidates[0].grounding_metadata:
+                    g_meta = exec_response.candidates[0].grounding_metadata
+                    if g_meta.web_search_queries:
+                        combined_grounding["queries"].extend(g_meta.web_search_queries)
+                    if g_meta.grounding_chunks:
+                        for chunk in g_meta.grounding_chunks:
+                            if chunk.web:
+                                if not any(s['uri'] == chunk.web.uri for s in combined_grounding["sources"]):
+                                    combined_grounding["sources"].append({"title": chunk.web.title, "uri": chunk.web.uri})
 
-            result_text = exec_response.text
-            research_results.append(f"【検索クエリ: {query} の調査結果】\n{result_text}")
-            
-            # 長すぎる場合はUI表示を切り詰める
-            disp_text = result_text[:100].replace('\n', ' ') + "..." if len(result_text) > 100 else result_text
-            full_thought_log += f"  * 📝 結果: {disp_text}\n"
-            thought_placeholder.markdown(full_thought_log)
-            
-            time.sleep(1) # APIレートリミット対策の短いウェイト
-            
+                result_text = exec_response.text
+                research_results.append(f"【検索クエリ: {query} の調査結果】\n{result_text}")
+                
+                # 長すぎる場合はUI表示を切り詰める
+                disp_text = result_text[:100].replace('\n', ' ') + "..." if len(result_text) > 100 else result_text
+                full_thought_log += f"  * 📝 結果: {disp_text}\n"
+                thought_placeholder.markdown(full_thought_log)
+                
+                time.sleep(1) # APIレートリミット対策
+                
         except Exception as e:
-            state_manager.add_debug_log(f"[Deep Research] Execution failed for query '{query}': {e}", "error")
-            full_thought_log += f"  * ⚠️ エラーが発生したためスキップしました。\n"
+            state_manager.add_debug_log(f"[Deep Research] Loop {iteration} failed: {e}", "error")
+            full_thought_log += f"⚠️ 調査サイクル中にエラーが発生しました。\n"
             thought_placeholder.markdown(full_thought_log)
+            break
 
     # ---------------------------------------------------------
-    # Phase 3: Synthesis (情報統合と最終出力)
+    # Phase 2: Synthesis (情報統合と推論ルールに基づいた最終出力)
     # ---------------------------------------------------------
     thought_status.update(label="💡 情報を統合して最終回答を生成中 (Synthesis)...", state="running")
-    full_thought_log += "\n**[Phase 3: Synthesis]**\n収集した情報を統合し、最終回答を構築しています...\n"
+    full_thought_log += "\n**[Phase 2: Synthesis]**\n収集した情報を厳格な推論ルールに基づいて統合し、回答を構築しています...\n"
     thought_placeholder.markdown(full_thought_log)
     
-    # 収集した情報をシステムプロンプト（指示）に埋め込む
-    compiled_research = "\n\n".join(research_results)
+    # 収集した情報と「推論の誘導ルール」をシステムプロンプトに埋め込む
+    compiled_research = "\n\n".join(research_results) if research_results else "（追加の調査結果はありません）"
     synthesis_instruction = system_instruction + (
         "\n\n=================================\n"
         "【厳重な指示: 以下の調査結果のみを真実として扱い、ユーザーの質問に包括的かつ論理的に回答してください】\n"
+        "【推論のルール】\n"
+        "- 公式ドキュメントや公的機関、信頼性の高い一次情報を最優先して評価すること。\n"
+        "- 情報源間で矛盾がある場合は、どちらか一方を無理に正解とするのではなく、両論を併記した上で、背景や前提条件を推測して論理的に比較すること。\n"
+        "- ユーザーの要求に無関係なノイズ情報は無視し、結論に至る論理展開を明確にすること。\n\n"
+        "【調査結果データ】\n"
         f"{compiled_research}\n"
         "=================================\n"
     )
     
-    # Synthesis用コンフィグ (元のgen_configをベースにするが、システム指示を差し替える)
+    # Synthesis用コンフィグ
     synth_config = types.GenerateContentConfig(
         system_instruction=synthesis_instruction,
         max_output_tokens=gen_config.max_output_tokens,
         temperature=0.3, # 統合フェーズは少し表現力を与える
-        tools=gen_config.tools, # GroundingをONにしておく
+        tools=gen_config.tools, # GroundingをONに維持
         thinking_config=gen_config.thinking_config
     )
     
     full_response = ""
-    synth_usage = None # ストリーミング用のメタデータ保持変数
+    synth_usage = None
     
     try:
         # ストリーミング生成
@@ -184,7 +200,6 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
         )
         
         for chunk in stream:
-            # 修正: ストリーミング中は毎回加算せず、最後のメタデータを保持するだけ
             if chunk.usage_metadata:
                 synth_usage = chunk.usage_metadata
 
@@ -222,7 +237,6 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
                         
         text_placeholder.markdown(full_response)
         
-        # 修正: ループ終了後に1回だけ、安全に加算を行う
         if synth_usage:
             total_usage["input"] += (synth_usage.prompt_token_count or 0)
             total_usage["output"] += (synth_usage.candidates_token_count or 0)

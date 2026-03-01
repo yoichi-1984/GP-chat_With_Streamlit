@@ -40,6 +40,7 @@ CLIラッパー (`main_runner.py`) は `streamlit run main.py` を自動で呼�
  │ 　　├── data_manager.py # ファイル管理  
  │ 　　├── execution_engine.py # 内部コード実行用  
  │ 　　├── research_agent.py  
+ │ 　　├── reasoning_agent.py
  │ 　　├── state_manager.py  
  │ 　　├── code_agent.py  
  │ 　　└── prompts.yaml # プロンプト定義  

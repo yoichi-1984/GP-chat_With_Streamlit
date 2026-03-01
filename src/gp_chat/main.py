@@ -16,6 +16,7 @@ try:
     from gp_chat import state_manager
     from gp_chat import code_agent
     from gp_chat import research_agent
+    from gp_chat import reasoning_agent
 except ImportError:
     import config
     import utils
@@ -24,6 +25,7 @@ except ImportError:
     import state_manager
     import code_agent
     import research_agent
+    import reasoning_agent
 
 def run_chatbot_app():
     st.set_page_config(page_title=config.UITexts.APP_TITLE, layout="wide")
@@ -205,6 +207,8 @@ def run_chatbot_app():
                 target_messages = st.session_state['messages']
 
             is_more_research = st.session_state.get('enable_more_research', False) and not is_special_mode
+            effort = st.session_state.get('reasoning_effort', 'high')
+            is_deep_reasoning = (effort == 'deep') and not is_more_research and not is_special_mode
 
             chat_contents = []
             system_instruction = ""
@@ -245,10 +249,8 @@ def run_chatbot_app():
                 
                 if context_parts and chat_contents:
                     chat_contents[-1].parts = context_parts + chat_contents[-1].parts
-
-            effort = st.session_state.get('reasoning_effort', 'high')
             
-            if is_more_research:
+            if is_more_research or is_deep_reasoning:
                 t_level = types.ThinkingLevel.HIGH
             else:
                 t_level = types.ThinkingLevel.HIGH if effort == 'high' else types.ThinkingLevel.LOW
@@ -260,6 +262,8 @@ def run_chatbot_app():
                 msg = "Google Search Tool Enabled"
                 if is_more_research and not enable_search:
                     msg += " (Forced by More Research Mode)."
+                elif is_deep_reasoning and enable_search:
+                    msg += " (Enabled in Deep Reasoning Mode)."
                 state_manager.add_debug_log(msg)
                 tools_config = [types.Tool(google_search=types.GoogleSearch())]
 
@@ -277,9 +281,23 @@ def run_chatbot_app():
                         include_thoughts=True
                     )
 
+                final_grounding_metadata = None
+
                 if is_more_research:
                     # Deep Researchエージェントに処理を委譲
                     full_response, usage_metadata, final_grounding_metadata = research_agent.run_deep_research(
+                        client=client,
+                        model_id=model_id,
+                        gen_config=gen_config,
+                        chat_contents=chat_contents,
+                        system_instruction=system_instruction,
+                        text_placeholder=text_placeholder,
+                        thought_status=thought_status,
+                        thought_placeholder=thought_placeholder
+                    )
+                elif is_deep_reasoning:
+                    # Deep Reasoningエージェントに処理を委譲
+                    full_response, usage_metadata, final_grounding_metadata = reasoning_agent.run_deep_reasoning(
                         client=client,
                         model_id=model_id,
                         gen_config=gen_config,
@@ -343,7 +361,6 @@ def run_chatbot_app():
                     else:
                         thought_status.update(label="思考完了 (Finished Thinking)", state="complete", expanded=False)
                     
-                    final_grounding_metadata = None
                     if grounding_chunks:
                         last_meta = grounding_chunks[-1]
                         final_grounding_metadata = {}
