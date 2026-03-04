@@ -69,6 +69,14 @@ def run_chatbot_app():
                     return
             
             st.session_state['python_canvases'][index] = text
+            # ファイルアップロード時も自動的に送信をONにする
+            if 'canvas_enabled' in st.session_state and index < len(st.session_state['canvas_enabled']):
+                st.session_state['canvas_enabled'][index] = True
+                c_key = st.session_state.get('canvas_key_counter', 0)
+                # ウィジェットのセッションステートも更新
+                st.session_state[f"en_cvs_{index}_{c_key}"] = True
+                if index == 0:
+                    st.session_state[f"en_cvs_s_{c_key}"] = True
 
     sidebar.render_sidebar(
         supported_extensions, env_files, 
@@ -244,7 +252,10 @@ def run_chatbot_app():
             if not is_special_mode:
                 context_parts = []
                 for i, code in enumerate(st.session_state['python_canvases']):
-                    if code.strip() and code != config.ACE_EDITOR_DEFAULT_CODE:
+                    # トグルがONになっているか確認 (デフォルトはTrue)
+                    is_enabled = st.session_state.get('canvas_enabled', [])[i] if i < len(st.session_state.get('canvas_enabled', [])) else True
+                    
+                    if is_enabled and code.strip() and code != config.ACE_EDITOR_DEFAULT_CODE:
                         context_parts.append(types.Part.from_text(text=f"\n[Canvas-{i+1}]\n```python\n{code}\n```"))
                 
                 if context_parts and chat_contents:
@@ -406,6 +417,20 @@ def run_chatbot_app():
                     state_manager.add_debug_log("Special validation messages merged to history.")
                 else:
                     st.session_state['messages'].append(assistant_msg)
+                    
+                    # --- 送信完了後、全てのCanvasを自動で無効(OFF)にする ---
+                    if 'canvas_enabled' in st.session_state:
+                        c_key = st.session_state.get('canvas_key_counter', 0)
+                        for i in range(len(st.session_state['canvas_enabled'])):
+                            st.session_state['canvas_enabled'][i] = False
+                            
+                            # Streamlitウィジェットの内部状態(key)も明示的にOFFにする
+                            en_key_multi = f"en_cvs_{i}_{c_key}"
+                            st.session_state[en_key_multi] = False
+                            
+                            if i == 0:
+                                en_key_single = f"en_cvs_s_{c_key}"
+                                st.session_state[en_key_single] = False
                     
                     if st.session_state.get('auto_save_enabled', True):
                         current_file = st.session_state.get('current_chat_filename')

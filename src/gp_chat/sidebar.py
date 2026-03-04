@@ -206,7 +206,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             
             if log_files:
                 selected_log = st.selectbox("履歴ファイルを選択", options=log_files, key="local_history_selector", label_visibility="collapsed")
-                # 修正: on_click コールバックを使用して、UI描画前にステートを更新する
                 st.button(
                     "読み込む", 
                     key="load_local_history_btn", 
@@ -334,18 +333,52 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.session_state['canvas_key_counter'] += 1
 
         canvases = st.session_state['python_canvases']
+        
+        # --- Canvas有効/無効ステートの初期化と拡張 ---
+        if 'canvas_enabled' not in st.session_state:
+            st.session_state['canvas_enabled'] = [True] * max(len(canvases), 5)
+        while len(st.session_state['canvas_enabled']) < len(canvases):
+            st.session_state['canvas_enabled'].append(True)
+
         if st.session_state.get('multi_code_enabled', False):
             # 上部の追加ボタン
             if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, key="add_canvas_top"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
+                st.session_state['canvas_enabled'].append(True) # 新規追加はデフォルトON
                 st.rerun()
             
             for i, content in enumerate(canvases):
-                st.write(f"**Canvas-{i + 1}**")
+                # タイトルとトグルを横並びにする
+                col_title, col_toggle = st.columns([1, 1])
+                with col_title:
+                    st.write(f"**Canvas-{i + 1}**")
+                
+                # 🌟 トグルの「場所」だけ先に確保する
+                toggle_placeholder = col_toggle.empty()
+
                 ace_key = f"ace_{i}_{st.session_state['canvas_key_counter']}"
                 updated = st_ace(value=content, key=ace_key, **config.ACE_EDITOR_SETTINGS, auto_update=True)
+                
+                # エディタの入力判定（トグル描画より"先"に行う）
                 if updated != content:
+                    is_meaningful_change = updated.strip() != content.strip()
                     canvases[i] = updated
+                    if is_meaningful_change and not st.session_state['canvas_enabled'][i]:
+                        st.session_state['canvas_enabled'][i] = True
+
+                en_key = f"en_cvs_{i}_{c_key}"
+                
+                # 🌟 ウィジェットの内部キャッシュと裏のステータスを強制同期する
+                # main.pyなどでOFFにされた場合、ここでウィジェット側の状態も上書きされます
+                if en_key in st.session_state and st.session_state[en_key] != st.session_state['canvas_enabled'][i]:
+                    st.session_state[en_key] = st.session_state['canvas_enabled'][i]
+
+                # 確保しておいた場所にトグルを描画する
+                with toggle_placeholder:
+                    is_enabled = st.toggle("AIへ送信", value=st.session_state['canvas_enabled'][i], key=en_key, help="ONの場合、次回のチャットにコードが添付されます。送信後自動でOFFになります。")
+                    if is_enabled != st.session_state['canvas_enabled'][i]:
+                        st.session_state['canvas_enabled'][i] = is_enabled
+                        st.rerun()
                 
                 c1, c2, c3 = st.columns(3)
                 c1.button(config.UITexts.CLEAR_BUTTON, key=f"clr_{i}", on_click=_local_handle_clear, args=(i,), use_container_width=True)
@@ -359,6 +392,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             # 下部の追加ボタン
             if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, key="add_canvas_bottom"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
+                st.session_state['canvas_enabled'].append(True)
                 st.rerun()
                 
         else:
@@ -366,10 +400,36 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 st.session_state['python_canvases'] = [canvases[0]]
                 st.rerun()
             
+            # シングルモードのタイトルとトグル
+            col_title, col_toggle = st.columns([1, 1])
+            with col_title:
+                st.write("**Canvas**")
+            
+            # 🌟 トグルの「場所」だけ先に確保する
+            toggle_placeholder = col_toggle.empty()
+
             ace_key = f"ace_single_{st.session_state['canvas_key_counter']}"
             updated = st_ace(value=canvases[0], key=ace_key, **config.ACE_EDITOR_SETTINGS, auto_update=True)
+            
+            # エディタの入力判定
             if updated != canvases[0]:
+                is_meaningful_change = updated.strip() != canvases[0].strip()
                 canvases[0] = updated
+                if is_meaningful_change and not st.session_state['canvas_enabled'][0]:
+                    st.session_state['canvas_enabled'][0] = True
+
+            en_key = f"en_cvs_s_{c_key}"
+            
+            # 🌟 ウィジェットの内部キャッシュと裏のステータスを強制同期する
+            if en_key in st.session_state and st.session_state[en_key] != st.session_state['canvas_enabled'][0]:
+                st.session_state[en_key] = st.session_state['canvas_enabled'][0]
+
+            # 確保しておいた場所にトグルを描画する
+            with toggle_placeholder:
+                is_enabled = st.toggle("AIへ送信", value=st.session_state['canvas_enabled'][0], key=en_key, help="ONの場合、次回のチャットにコードが添付されます。送信後自動でOFFになります。")
+                if is_enabled != st.session_state['canvas_enabled'][0]:
+                    st.session_state['canvas_enabled'][0] = is_enabled
+                    st.rerun()
 
             c1, c2, c3 = st.columns(3)
             c1.button(config.UITexts.CLEAR_BUTTON, key="clr_s", on_click=_local_handle_clear, args=(0,), use_container_width=True)
@@ -383,7 +443,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.2.7</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.2.8</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>
