@@ -27,6 +27,12 @@ class VirtualUploadedFile:
 
 def render_sidebar(supported_types, env_files, load_history, load_local_history, handle_clear, handle_review, handle_validation, handle_file_upload):
     """Renders the sidebar with Gemini 3 specific options and model selector."""
+    
+    # トグルUIが操作されたときに裏のステータスを更新するコールバック
+    def _toggle_cb(idx, k):
+        if k in st.session_state:
+            st.session_state['canvas_enabled'][idx] = st.session_state[k]
+
     with st.sidebar:
         # --- CSS Style Injection ---
         st.markdown(
@@ -40,7 +46,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             unsafe_allow_html=True
         )
 
-        # カウンターを取得（この数字が変わることで、UIのキャッシュが破棄される）
+        # カウンターを取得（この数字が変わることで、エディタのキャッシュが破棄される）
         c_key = st.session_state.get('canvas_key_counter', 0)
 
         # --- 1. AIモデル選択エリア ---
@@ -82,9 +88,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # --- More Research Mode と UI連動・ロック機構 ---
         is_more_research = st.session_state.get('enable_more_research', False)
 
-        # 追加: 'deep' を選択肢に追加
         effort_options = ['high', 'low', 'deep']
-        # More Research ON時は強制的に 'high' に見せる
         curr_effort = 'high' if is_more_research else st.session_state.get('reasoning_effort', 'high')
         effort_idx = effort_options.index(curr_effort) if curr_effort in effort_options else 0
 
@@ -92,9 +96,9 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             label="Thinking Level",
             options=effort_options,
             index=effort_idx,
-            disabled=is_more_research, # More Research ONならロック
+            disabled=is_more_research, 
             help="high: 標準の推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research Mode)" if is_more_research else ""),
-            key=f"effort_sel_{c_key}" # カウンター付きキー
+            key=f"effort_sel_{c_key}" 
         )
         if not is_more_research and sel_effort != st.session_state.get('reasoning_effort', 'high'):
             st.session_state['reasoning_effort'] = sel_effort
@@ -102,8 +106,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         is_deep_reasoning = st.session_state.get('reasoning_effort') == 'deep'
         
-        # More Research ON時は強制的にチェックを入れる
-        # Deep Reasoning時はユーザーが自由にON/OFF可能とするため連動やロックを解除
         curr_search = st.session_state.get('enable_google_search', False)
         if is_more_research:
             curr_search = True
@@ -111,27 +113,24 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         sel_search = st.checkbox(
             label=config.UITexts.WEB_SEARCH_LABEL,
             value=curr_search,
-            disabled=is_more_research, # More Research ONならロック（Deep Reasoningではロックしない）
+            disabled=is_more_research, 
             help=config.UITexts.WEB_SEARCH_HELP + (" (Forced ON in More Research Mode)" if is_more_research else ""),
-            key=f"search_chk_{c_key}" # カウンター付きキー
+            key=f"search_chk_{c_key}"
         )
         if not is_more_research and sel_search != st.session_state.get('enable_google_search', False):
             st.session_state['enable_google_search'] = sel_search
             st.rerun()
 
-        # More Research Mode スイッチ
         sel_more_research = st.checkbox(
             label=config.UITexts.MORE_RESEARCH_LABEL,
             value=is_more_research,
-            disabled=is_deep_reasoning, # Deep Reasoning中は排他ロック
+            disabled=is_deep_reasoning,
             help=config.UITexts.MORE_RESEARCH_HELP,
-            key=f"more_res_chk_{c_key}" # カウンター付きキー
+            key=f"more_res_chk_{c_key}" 
         )
         
-        # 値が変わった瞬間に画面を再描画して、上のロック状態を即座に反映させる
         if sel_more_research != is_more_research:
             st.session_state['enable_more_research'] = sel_more_research
-            # 連動するステータスもここで一気に書き換える
             if sel_more_research:
                 st.session_state['reasoning_effort'] = 'high'
                 st.session_state['enable_google_search'] = True
@@ -153,11 +152,9 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             else:
                 st.session_state["file_uploader_key"] = 1
             
-            # クリップボードキューもリセット
             if 'clipboard_queue' in st.session_state:
                 st.session_state['clipboard_queue'] = []
             
-            # 自動保存用のファイル名情報もリセット
             if 'current_chat_filename' in st.session_state:
                 del st.session_state['current_chat_filename']
 
@@ -173,7 +170,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             label="📈 グラフ描画・データ分析", 
             value=st.session_state.get('auto_plot_enabled', False),
             help="ONにすると、AIが生成したPythonコードを実行し、グラフ描画や計算結果を表示します。\nアップロードしたファイルは `files['name.csv']` でアクセス可能です。",
-            key=f"plot_chk_{c_key}" # カウンター付きキー
+            key=f"plot_chk_{c_key}" 
         )
         if sel_plot != st.session_state.get('auto_plot_enabled'):
             st.session_state['auto_plot_enabled'] = sel_plot
@@ -182,7 +179,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # History Management
         st.subheader(config.UITexts.HISTORY_SUBHEADER)
         
-        # --- 自動履歴保存チェックボックス ---
         if 'auto_save_enabled' not in st.session_state:
             st.session_state['auto_save_enabled'] = True
             
@@ -190,17 +186,15 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             "■ 自動履歴保存", 
             value=st.session_state.get('auto_save_enabled', True),
             help="会話が2往復以上続くと、./chat_log フォルダに自動保存します。",
-            key=f"save_chk_{c_key}" # カウンター付きキー
+            key=f"save_chk_{c_key}" 
         )
         if sel_save != st.session_state.get('auto_save_enabled'):
             st.session_state['auto_save_enabled'] = sel_save
             st.rerun()
         
-        # --- ローカル保存された履歴からの再開 ---
         st.caption("📂 保存済み履歴から再開")
         log_dir = "chat_log"
         if os.path.exists(log_dir):
-            # jsonファイルを検索し、更新日時が新しい順にソート
             log_files = [f for f in os.listdir(log_dir) if f.endswith(".json")]
             log_files.sort(key=lambda x: os.path.getmtime(os.path.join(log_dir, x)), reverse=True)
             
@@ -218,10 +212,8 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         else:
              st.caption("（履歴フォルダはありません）")
 
-        # --- 既存機能: ファイルアップロードによる再開 ---
         st.caption("📤 JSONファイルから再開")
         
-        # 履歴ダウンロードボタン
         if st.session_state.get('messages'):
             history_data = {
                 "messages": st.session_state['messages'],
@@ -316,39 +308,41 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # --- 4. コードエディタ (Canvas) エリア ---
         st.subheader(config.UITexts.EDITOR_SUBHEADER)
         
-        # マルチコードチェックボックスも同様に保護
         sel_multi = st.checkbox(
             config.UITexts.MULTI_CODE_CHECKBOX, 
             value=st.session_state.get('multi_code_enabled', False),
-            key=f"multi_chk_{c_key}" # カウンター付きキー
+            key=f"multi_chk_{c_key}"
         )
         if sel_multi != st.session_state.get('multi_code_enabled'):
             st.session_state['multi_code_enabled'] = sel_multi
             st.rerun()
 
         def _local_handle_clear(idx):
-            # メイン処理（テキストを初期値に戻す）を実行
             handle_clear(idx)
-            # keyカウンターを増やしてエディタを強制再描画
             st.session_state['canvas_key_counter'] += 1
 
         canvases = st.session_state['python_canvases']
         
-        # --- Canvas有効/無効ステートの初期化と拡張 ---
+        # --- Canvasステータスとトグルキーの初期化 ---
         if 'canvas_enabled' not in st.session_state:
             st.session_state['canvas_enabled'] = [True] * max(len(canvases), 5)
         while len(st.session_state['canvas_enabled']) < len(canvases):
             st.session_state['canvas_enabled'].append(True)
 
+        if 'toggle_keys' not in st.session_state:
+            st.session_state['toggle_keys'] = [0] * max(len(canvases), 5)
+        while len(st.session_state['toggle_keys']) < len(canvases):
+            st.session_state['toggle_keys'].append(0)
+
         if st.session_state.get('multi_code_enabled', False):
             # 上部の追加ボタン
             if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, key="add_canvas_top"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
-                st.session_state['canvas_enabled'].append(True) # 新規追加はデフォルトON
+                st.session_state['canvas_enabled'].append(True)
+                st.session_state['toggle_keys'].append(0)
                 st.rerun()
             
             for i, content in enumerate(canvases):
-                # タイトルとトグルを横並びにする
                 col_title, col_toggle = st.columns([1, 1])
                 with col_title:
                     st.write(f"**Canvas-{i + 1}**")
@@ -366,19 +360,24 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                     if is_meaningful_change and not st.session_state['canvas_enabled'][i]:
                         st.session_state['canvas_enabled'][i] = True
 
-                en_key = f"en_cvs_{i}_{c_key}"
+                # 🌟 裏のステータス(canvas_enabled)とUIの乖離を検知し、ズレていればキーを更新する
+                tk = st.session_state['toggle_keys'][i]
+                expected_key = f"cvs_tog_{i}_{tk}"
                 
-                # 🌟 ウィジェットの内部キャッシュと裏のステータスを強制同期する
-                # main.pyなどでOFFにされた場合、ここでウィジェット側の状態も上書きされます
-                if en_key in st.session_state and st.session_state[en_key] != st.session_state['canvas_enabled'][i]:
-                    st.session_state[en_key] = st.session_state['canvas_enabled'][i]
+                if expected_key in st.session_state and st.session_state[expected_key] != st.session_state['canvas_enabled'][i]:
+                    st.session_state['toggle_keys'][i] += 1
+                    expected_key = f"cvs_tog_{i}_{st.session_state['toggle_keys'][i]}"
 
                 # 確保しておいた場所にトグルを描画する
                 with toggle_placeholder:
-                    is_enabled = st.toggle("AIへ送信", value=st.session_state['canvas_enabled'][i], key=en_key, help="ONの場合、次回のチャットにコードが添付されます。送信後自動でOFFになります。")
-                    if is_enabled != st.session_state['canvas_enabled'][i]:
-                        st.session_state['canvas_enabled'][i] = is_enabled
-                        st.rerun()
+                    st.toggle(
+                        "AIへ送信", 
+                        value=st.session_state['canvas_enabled'][i], 
+                        key=expected_key, 
+                        on_change=_toggle_cb,
+                        args=(i, expected_key),
+                        help="ONの場合、次回のチャットにコードが添付されます。送信後自動でOFFになります。"
+                    )
                 
                 c1, c2, c3 = st.columns(3)
                 c1.button(config.UITexts.CLEAR_BUTTON, key=f"clr_{i}", on_click=_local_handle_clear, args=(i,), use_container_width=True)
@@ -393,6 +392,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, key="add_canvas_bottom"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
                 st.session_state['canvas_enabled'].append(True)
+                st.session_state['toggle_keys'].append(0)
                 st.rerun()
                 
         else:
@@ -418,18 +418,24 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 if is_meaningful_change and not st.session_state['canvas_enabled'][0]:
                     st.session_state['canvas_enabled'][0] = True
 
-            en_key = f"en_cvs_s_{c_key}"
+            # 🌟 裏のステータス(canvas_enabled)とUIの乖離を検知し、ズレていればキーを更新する
+            tk = st.session_state['toggle_keys'][0]
+            expected_key = f"cvs_tog_s_{tk}"
             
-            # 🌟 ウィジェットの内部キャッシュと裏のステータスを強制同期する
-            if en_key in st.session_state and st.session_state[en_key] != st.session_state['canvas_enabled'][0]:
-                st.session_state[en_key] = st.session_state['canvas_enabled'][0]
+            if expected_key in st.session_state and st.session_state[expected_key] != st.session_state['canvas_enabled'][0]:
+                st.session_state['toggle_keys'][0] += 1
+                expected_key = f"cvs_tog_s_{st.session_state['toggle_keys'][0]}"
 
             # 確保しておいた場所にトグルを描画する
             with toggle_placeholder:
-                is_enabled = st.toggle("AIへ送信", value=st.session_state['canvas_enabled'][0], key=en_key, help="ONの場合、次回のチャットにコードが添付されます。送信後自動でOFFになります。")
-                if is_enabled != st.session_state['canvas_enabled'][0]:
-                    st.session_state['canvas_enabled'][0] = is_enabled
-                    st.rerun()
+                st.toggle(
+                    "AIへ送信", 
+                    value=st.session_state['canvas_enabled'][0], 
+                    key=expected_key, 
+                    on_change=_toggle_cb,
+                    args=(0, expected_key),
+                    help="ONの場合、次回のチャットにコードが添付されます。送信後自動でOFFになります。"
+                )
 
             c1, c2, c3 = st.columns(3)
             c1.button(config.UITexts.CLEAR_BUTTON, key="clr_s", on_click=_local_handle_clear, args=(0,), use_container_width=True)
