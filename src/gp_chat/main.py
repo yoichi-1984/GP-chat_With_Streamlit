@@ -1,6 +1,8 @@
 import os
 import sys
 import base64
+import json
+import datetime
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -125,7 +127,52 @@ def run_chatbot_app():
             st.rerun()
         st.stop()
 
-    for msg in st.session_state['messages']:
+    # --- 新規追加: チャット分岐処理用のコールバック関数 ---
+    def handle_branching(target_index):
+        # target_index までのメッセージを抽出 (切り取り)
+        new_messages = st.session_state['messages'][:target_index + 1]
+        
+        # 新しいファイル名の生成 (utils.py に実装した関数を呼び出し)
+        current_file = st.session_state.get('current_chat_filename')
+        new_filename = utils.generate_branch_filename(current_file, "chat_log")
+        
+        # JSONデータの構築と保存
+        history_data = {
+            "messages": new_messages,
+            "python_canvases": st.session_state.get('python_canvases', []),
+            "multi_code_enabled": st.session_state.get('multi_code_enabled', False),
+            "enable_more_research": st.session_state.get('enable_more_research', False),
+            "enable_google_search": st.session_state.get('enable_google_search', False),
+            "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
+            "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
+            "saved_at": datetime.datetime.now().isoformat()
+        }
+        
+        log_dir = "chat_log"
+        os.makedirs(log_dir, exist_ok=True)
+        new_filepath = os.path.join(log_dir, new_filename)
+        try:
+            with open(new_filepath, "w", encoding="utf-8") as f:
+                json.dump(history_data, f, ensure_ascii=False, indent=2)
+                
+            # セッションステートの更新
+            st.session_state['messages'] = new_messages
+            st.session_state['current_chat_filename'] = new_filename
+            
+            # 累積トークン数の再計算
+            total_tokens = sum(
+                m.get('usage', {}).get('total_tokens', 0) for m in new_messages if 'usage' in m
+            )
+            st.session_state['total_usage']['total_tokens'] = total_tokens
+            
+            state_manager.add_debug_log(f"Branched chat to: {new_filename}")
+            st.toast(f"✂️ 会話を分岐し、{new_filename} として保存しました", icon="✅")
+        except Exception as e:
+            st.error(f"分岐の保存に失敗しました: {e}")
+            state_manager.add_debug_log(f"Branch save error: {e}", "error")
+
+    # --- チャット履歴の描画ループ ---
+    for i, msg in enumerate(st.session_state['messages']):
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
@@ -153,6 +200,13 @@ def run_chatbot_app():
                         f"📥 **Input (Context):** {u['input_tokens']:,} / {INPUT_LIMIT:,} ({in_p:.2f}%)\n"
                         f"📤 **Output (Response):** {u['output_tokens']:,} / {OUTPUT_LIMIT:,} ({out_p:.2f}%)"
                     )
+                    
+                    # --- 新規追加: 分岐ボタン ---
+                    # 生成中でない場合のみボタンを表示・有効化
+                    if not st.session_state.get('is_generating', False):
+                        if st.button("✂️ この会話から分岐", key=f"branch_btn_{i}", help="この回答までの履歴で新しいチャットを生成・保存します"):
+                            handle_branching(i)
+                            st.rerun()
 
     if st.session_state['total_usage']['total_tokens'] > 0:
         st.divider()
@@ -160,6 +214,7 @@ def run_chatbot_app():
 
     if 'draft_input' in st.session_state:
         st.warning("⚠️ 前回の送信が中断されました。テキストを復元しました。")
+        
         with st.form("draft_form"):
             draft_text = st.text_area("編集して再送信", value=st.session_state['draft_input'], height=150)
             c1, c2 = st.columns([1, 4])
@@ -176,6 +231,41 @@ def run_chatbot_app():
             elif cancel_draft:
                 del st.session_state['draft_input']
                 st.rerun()
+                
+        # --- 修正点②: フォーム表示後に強制的に最下段へスクロールするより堅牢なJSハック ---
+        # フォームの直下にこのコンポーネントを置くことで、確実に一番下までスクロールさせます
+        st.components.v1.html(
+            """
+            <script>
+            setTimeout(function() {
+                try {
+                    const doc = window.parent.document;
+                    let scrolled = false;
+                    
+                    // 自分自身のiframeを探して、そこまでスクロールさせる（クラス名に依存しない方法）
+                    const iframes = doc.querySelectorAll('iframe');
+                    for (let i = 0; i < iframes.length; i++) {
+                        if (iframes[i].contentWindow === window) {
+                            iframes[i].scrollIntoView({ behavior: 'smooth', block: 'end' });
+                            scrolled = true;
+                            break;
+                        }
+                    }
+                    
+                    // iframeが見つからなかった場合のフォールバック
+                    if (!scrolled) {
+                        const mainContainer = doc.querySelector('.stApp [data-testid="stMainBlockContainer"]') || doc.querySelector('.main .block-container');
+                        if (mainContainer) {
+                            mainContainer.scrollTop = mainContainer.scrollHeight;
+                        }
+                    }
+                } catch (e) {}
+            }, 300); // UIの描画完了を待つために0.3秒遅延させる
+            </script>
+            """,
+            height=0
+        )
+        # -------------------------------------------------------------------------
     
     else:
         if prompt := st.chat_input("指示を入力...", disabled=st.session_state['is_generating']):
@@ -189,6 +279,11 @@ def run_chatbot_app():
         with c_stop:
             if st.button("■ 送信取り消し", key="stop_generating_btn", type="primary"):
                 st.session_state['is_generating'] = False
+                
+                # --- 修正点①: 二重リロードを防ぐため、ここで即座にリカバリー処理を実行 ---
+                state_manager.recover_interrupted_session()
+                # -------------------------------------------------------------------------
+                
                 st.rerun()
         with c_info:
             st.info("生成中... 「送信取り消し」を押すと中断し、テキストを復元します。")

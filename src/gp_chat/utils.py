@@ -388,3 +388,46 @@ def save_auto_history(messages, canvases, multi_code_enabled, client, current_fi
     except Exception as e:
         print(f"Auto-save failed: {e}")
         return current_filename
+
+# --- 新規追加: チャット分岐用のファイル名生成関数 ---
+
+def generate_branch_filename(current_filename, log_dir="chat_log"):
+    """
+    現在のファイル名から、新しい分岐ファイル名（日付6桁_タイトル-●●.json）を生成する。
+    既存の枝番を無視してベースタイトルを抽出し、フラットに連番を振る。
+    """
+    today_str = datetime.datetime.now().strftime("%y%m%d")
+    base_title = "分岐チャット" # デフォルト値
+
+    if current_filename:
+        # 拡張子を除外
+        name_no_ext = os.path.splitext(current_filename)[0]
+        
+        # 正規表現で「(日付6桁_)(ベースタイトル)(-数字2桁)」を分解してベースタイトルを抽出
+        match = re.match(r'^(?:\d{6}_)?(.*?)(?:-\d{2,})?$', name_no_ext)
+        if match and match.group(1):
+            base_title = match.group(1)
+        else:
+            base_title = name_no_ext
+
+    # 既存の分岐ファイルを検索して最大の枝番を見つける
+    pattern = os.path.join(log_dir, f"*_{base_title}-*.json")
+    existing_files = glob.glob(pattern)
+    
+    max_branch = 1 # オリジナルを1とみなす
+    for f in existing_files:
+        basename = os.path.basename(f)
+        name_no_ext = os.path.splitext(basename)[0]
+        
+        # 末尾のハイフンと数字を抽出
+        suffix_match = re.search(r'-(\d{2,})$', name_no_ext)
+        if suffix_match:
+            num = int(suffix_match.group(1))
+            if num > max_branch:
+                max_branch = num
+
+    # 次の枝番を決定（99を超えた場合はそのまま3桁表示にする安全設計）
+    next_branch = max_branch + 1
+    branch_str = f"{next_branch:02d}"
+    
+    return f"{today_str}_{base_title}-{branch_str}.json"
