@@ -187,14 +187,22 @@ def process_uploaded_files_for_gemini(uploaded_files):
             api_parts.append(types.Part.from_bytes(data=file_bytes, mime_type=mime_type))
             display_info.append({"name": filename, "type": mime_type, "size": len(file_bytes)})
         
-        elif mime_type.startswith("text/") or filename.endswith((".py", ".js", ".md", ".txt", ".json")):
+        elif mime_type.startswith("text/") or filename.endswith((".py", ".js", ".md", ".txt", ".json", ".csv", "yaml")):
             try:
                 text_content = file_bytes.decode("utf-8")
-                prompt_text = f"\n\n[Attached File: {filename}]\n```\n{text_content}\n```\n"
-                api_parts.append(types.Part.from_text(text=prompt_text))
-                display_info.append({"name": filename, "type": "text", "size": len(file_bytes)})
-            except Exception:
-                 st.warning(f"Could not decode text file: {filename}")
+            except UnicodeDecodeError:
+                try:
+                    text_content = file_bytes.decode("cp932")
+                except UnicodeDecodeError:
+                    text_content = file_bytes.decode("utf-8", errors="replace")
+                    st.toast(f"⚠️ {filename}: 一部の文字化けを許容して読み込みました", icon="⚠️")
+            except Exception as e:
+                st.warning(f"Could not read text file {filename}: {e}")
+                continue
+
+            prompt_text = f"\n\n[Attached File: {filename}]\n```\n{text_content}\n```\n"
+            api_parts.append(types.Part.from_text(text=prompt_text))
+            display_info.append({"name": filename, "type": "text", "size": len(file_bytes)})
 
         else:
             st.warning(f"Unsupported file type for direct AI processing: {filename} ({mime_type})")
