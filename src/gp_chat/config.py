@@ -92,9 +92,9 @@ class UITexts:
     FILE_UPLOAD_HEADER = "📂 ファイル添付"
     # PPT/PPTXを追加
     FILE_UPLOAD_LABEL = "画像 / PDF / Word / PPT"
-    FILE_UPLOAD_HELP = "チャット送信時にAIに読み込ませます。送信後にクリアされます。"
+    FILE_UPLOAD_HELP = "チャット送信時にAIに読み込ませます。×ボタンで手動削除するまで、毎ターン送信され続けます。"
     # ppt, pptxを追加
-    SUPPORTED_FILE_TYPES = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md"]
+    SUPPORTED_FILE_TYPES = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md", "yaml"]
 
     SYSTEM_PROMPT_HEADER = "Set AI System Role"
     SYSTEM_PROMPT_TEXT_AREA_LABEL = "System Role"

@@ -542,12 +542,7 @@ def run_chatbot_app():
                             st.session_state['current_chat_filename'] = new_filename
                             st.session_state['current_report_folder'] = os.path.splitext(new_filename)[0]
 
-                if 'uploaded_file_queue' in st.session_state:
-                     st.session_state['uploaded_file_queue'] = []
-                     # これによりUI上のアップローダーを強制リセットし無限送信を防ぐ
-                     st.session_state['file_uploader_key'] = st.session_state.get('file_uploader_key', 0) + 1
-                if 'clipboard_queue' in st.session_state:
-                     st.session_state['clipboard_queue'] = []
+                # ファイルとクリップボードのクリア処理を完全に削除（ユーザーが手動で消すまで保持する）
 
                 # 実行エンジンの統合
                 auto_plot = st.session_state.get('auto_plot_enabled', False)
