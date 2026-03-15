@@ -1,3 +1,5 @@
+# code_agent.py:
+import os
 import re
 import base64
 import streamlit as st
@@ -107,6 +109,7 @@ def run_auto_plot_agent(client, model_id, gen_config, initial_response_text, ava
                             )
                             if new_filename:
                                 st.session_state['current_chat_filename'] = new_filename
+                                st.session_state['current_report_folder'] = os.path.splitext(new_filename)[0]
 
                     # ステータスの更新
                     if is_error:

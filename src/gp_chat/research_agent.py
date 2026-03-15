@@ -91,7 +91,37 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
                 total_usage["input"] += (react_response.usage_metadata.prompt_token_count or 0)
                 total_usage["output"] += (react_response.usage_metadata.candidates_token_count or 0)
                 
-            react_data = json.loads(react_response.text)
+            # --- JSONパースの堅牢化 (クラッシュ防止対策) ---
+            raw_text = react_response.text
+            try:
+                clean_text = raw_text.strip()
+                # Markdownのコードブロック表現を取り除く
+                if clean_text.startswith("```"):
+                    lines = clean_text.split('\n')
+                    if len(lines) >= 3:
+                        clean_text = '\n'.join(lines[1:-1]).strip()
+                    else:
+                        clean_text = clean_text.replace("```json", "").replace("```", "").strip()
+                
+                # 前後にテキストが混じっていてもJSONオブジェクト部分だけを抽出する
+                start_idx = clean_text.find('{')
+                end_idx = clean_text.rfind('}')
+                if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
+                    clean_text = clean_text[start_idx:end_idx+1]
+                else:
+                    raise ValueError("No JSON object found in the response.")
+
+                react_data = json.loads(clean_text)
+            except Exception as e:
+                state_manager.add_debug_log(f"[Deep Research] JSON Parse Error: {e}. Raw text: {raw_text[:100]}...", "error")
+                # パースに失敗した場合は、クラッシュさせずに安全なデフォルト値を設定する
+                react_data = {
+                    "status": "sufficient", # パースエラーが続くのを防ぐため、一旦十分として次へ進める
+                    "next_queries": [], 
+                    "reasoning": f"AIの判断結果（JSON）の解析に失敗したため、現在の情報で統合フェーズへ移行します。({e})"
+                }
+            # ----------------------------------------------
+            
             status = react_data.get("status", "needs_more_info")
             next_queries = react_data.get("next_queries", [])
             reasoning = react_data.get("reasoning", "")

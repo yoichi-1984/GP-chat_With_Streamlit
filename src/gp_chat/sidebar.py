@@ -1,3 +1,4 @@
+# sidebar.py:
 import streamlit as st
 import os
 import json
@@ -87,6 +88,8 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         # --- More Research Mode と UI連動・ロック機構 ---
         is_more_research = st.session_state.get('enable_more_research', False)
+        if 'enable_report_pdf' not in st.session_state:
+            st.session_state['enable_report_pdf'] = False
 
         effort_options = ['high', 'low', 'deep']
         curr_effort = 'high' if is_more_research else st.session_state.get('reasoning_effort', 'high')
@@ -135,6 +138,16 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 st.session_state['reasoning_effort'] = 'high'
                 st.session_state['enable_google_search'] = True
             st.rerun()
+
+        sel_report_pdf = st.checkbox(
+            label="レポート機能（pdf）",
+            value=st.session_state.get('enable_report_pdf', False),
+            help="ON の間は通常回答の代わりに HTML スライドを生成し、./slide_data 配下へ HTML と PDF を保存します。",
+            key=f"report_pdf_chk_{c_key}"
+        )
+        if sel_report_pdf != st.session_state.get('enable_report_pdf', False):
+            st.session_state['enable_report_pdf'] = sel_report_pdf
+            st.rerun()
         
         st.divider()
 
@@ -155,8 +168,19 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             if 'clipboard_queue' in st.session_state:
                 st.session_state['clipboard_queue'] = []
             
+            # --- 初期化漏れを完全に防ぐための追加処理 ---
+            st.session_state['always_send_all_canvases'] = False
+            if 'canvas_enabled' in st.session_state:
+                del st.session_state['canvas_enabled']
+            if 'toggle_keys' in st.session_state:
+                del st.session_state['toggle_keys']
+            # -------------------------------------------
+            
             if 'current_chat_filename' in st.session_state:
                 del st.session_state['current_chat_filename']
+            if 'current_report_folder' in st.session_state:
+                del st.session_state['current_report_folder']
+            st.session_state['enable_report_pdf'] = False
 
         st.header(config.UITexts.SIDEBAR_HEADER)
         if st.button(config.UITexts.RESET_BUTTON_LABEL, use_container_width=True, on_click=handle_full_reset):
@@ -220,9 +244,14 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 "python_canvases": st.session_state['python_canvases'],
                 "multi_code_enabled": st.session_state.get('multi_code_enabled', False),
                 "enable_more_research": st.session_state.get('enable_more_research', False),
+                "enable_report_pdf": st.session_state.get('enable_report_pdf', False),
                 "enable_google_search": st.session_state.get('enable_google_search', False),
                 "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
-                "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False)
+                "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
+                "current_model_id": st.session_state.get('current_model_id'),
+                "selected_env_file": st.session_state.get('selected_env_file'),
+                "auto_save_enabled": st.session_state.get('auto_save_enabled', True),
+                "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False)
             }
             st.download_button(
                 label=config.UITexts.DOWNLOAD_HISTORY_BUTTON,
@@ -308,6 +337,27 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # --- 4. コードエディタ (Canvas) エリア ---
         st.subheader(config.UITexts.EDITOR_SUBHEADER)
         
+        # --- 新機能: 全てを常に送信するトグル ---
+        if 'always_send_all_canvases' not in st.session_state:
+            st.session_state['always_send_all_canvases'] = False
+
+        def _toggle_all_cb():
+            is_all_on = st.session_state['always_send_all_canvases_ui']
+            st.session_state['always_send_all_canvases'] = is_all_on
+            if is_all_on:
+                # 全てのCanvasをONにする
+                for i in range(len(st.session_state['canvas_enabled'])):
+                    st.session_state['canvas_enabled'][i] = True
+                    st.session_state['toggle_keys'][i] += 1
+
+        st.toggle(
+            "⚡ 全てのCanvasを常にAIへ送る", 
+            value=st.session_state.get('always_send_all_canvases', False),
+            key="always_send_all_canvases_ui",
+            on_change=_toggle_all_cb,
+            help="ONにすると、すべてのCanvasが送信対象になり、送信後もOFFに戻りません。"
+        )
+
         sel_multi = st.checkbox(
             config.UITexts.MULTI_CODE_CHECKBOX, 
             value=st.session_state.get('multi_code_enabled', False),
@@ -347,20 +397,20 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 with col_title:
                     st.write(f"**Canvas-{i + 1}**")
                 
-                # 🌟 トグルの「場所」だけ先に確保する
+                # トグルの場所を確保
                 toggle_placeholder = col_toggle.empty()
 
                 ace_key = f"ace_{i}_{st.session_state['canvas_key_counter']}"
                 updated = st_ace(value=content, key=ace_key, **config.ACE_EDITOR_SETTINGS, auto_update=True)
                 
-                # エディタの入力判定（トグル描画より"先"に行う）
+                # エディタの入力判定
                 if updated != content:
                     is_meaningful_change = updated.strip() != content.strip()
                     canvases[i] = updated
                     if is_meaningful_change and not st.session_state['canvas_enabled'][i]:
                         st.session_state['canvas_enabled'][i] = True
 
-                # 🌟 裏のステータス(canvas_enabled)とUIの乖離を検知し、ズレていればキーを更新する
+                # 裏のステータスとUIの乖離を補正
                 tk = st.session_state['toggle_keys'][i]
                 expected_key = f"cvs_tog_{i}_{tk}"
                 
@@ -368,7 +418,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                     st.session_state['toggle_keys'][i] += 1
                     expected_key = f"cvs_tog_{i}_{st.session_state['toggle_keys'][i]}"
 
-                # 確保しておいた場所にトグルを描画する
                 with toggle_placeholder:
                     st.toggle(
                         "AIへ送信", 
@@ -400,25 +449,22 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 st.session_state['python_canvases'] = [canvases[0]]
                 st.rerun()
             
-            # シングルモードのタイトルとトグル
+            # シングルモード
             col_title, col_toggle = st.columns([1, 1])
             with col_title:
                 st.write("**Canvas**")
             
-            # 🌟 トグルの「場所」だけ先に確保する
             toggle_placeholder = col_toggle.empty()
 
             ace_key = f"ace_single_{st.session_state['canvas_key_counter']}"
             updated = st_ace(value=canvases[0], key=ace_key, **config.ACE_EDITOR_SETTINGS, auto_update=True)
             
-            # エディタの入力判定
             if updated != canvases[0]:
                 is_meaningful_change = updated.strip() != canvases[0].strip()
                 canvases[0] = updated
                 if is_meaningful_change and not st.session_state['canvas_enabled'][0]:
                     st.session_state['canvas_enabled'][0] = True
 
-            # 🌟 裏のステータス(canvas_enabled)とUIの乖離を検知し、ズレていればキーを更新する
             tk = st.session_state['toggle_keys'][0]
             expected_key = f"cvs_tog_s_{tk}"
             
@@ -426,7 +472,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 st.session_state['toggle_keys'][0] += 1
                 expected_key = f"cvs_tog_s_{st.session_state['toggle_keys'][0]}"
 
-            # 確保しておいた場所にトグルを描画する
             with toggle_placeholder:
                 st.toggle(
                     "AIへ送信", 

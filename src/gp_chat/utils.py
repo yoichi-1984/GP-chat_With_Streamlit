@@ -1,3 +1,4 @@
+# utils.py:
 import os
 import sys
 import yaml
@@ -266,9 +267,7 @@ def load_app_config():
 
 def sanitize_filename(filename):
     """OSで禁止されている文字を置換し、長さを制限する"""
-    # Windows等の禁止文字: \ / : * ? " < > |
     safe_name = re.sub(r'[\\/*?:"<>|]', '_', filename)
-    # 改行コードなどを削除
     safe_name = safe_name.replace('\n', '').replace('\r', '').strip()
     return safe_name
 
@@ -287,34 +286,28 @@ def get_unique_filename(directory, base_filename):
 def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
     """
     会話履歴からチャット名を生成する。
-    軽量なモデルを使用し、Thinking LevelはLOW、GroundingはOFF。
     """
     try:
-        # システムプロンプトを除く直近の会話内容を抽出（軽量化のためテキストのみ）
         conversation_text = ""
         for m in messages:
             if m["role"] != "system":
-                # コンテンツが長い場合は切り詰める
                 content = m.get("content", "")[:500]
                 conversation_text += f"{m['role']}: {content}\n"
         
         prompt = (
-            "以下の会話の内容を、15文字から20文字程度の** 日本語ベースの **短い要約（タイトル）にしてください。必要なら多少の英語を使ってもOKです。\n"
+            "以下の会話の内容を、15文字から20文字程度の** 日本語ベースの **短い要約（タイトル）にしてください。\n"
             "ファイル名として使用するため、記号は含めないでください。\n"
-            "例: Pythonのクラス継承について\n"
-            "例: 2024年のAI動向\n\n"
             f"会話内容:\n{conversation_text}"
         )
 
-        # タイトル生成用の設定 (Thinking Level: LOW)
         gen_config = types.GenerateContentConfig(
-            max_output_tokens=10000,
+            max_output_tokens=1000,
             temperature=0.1
         )
         if "gemini-3" in model_id:
              gen_config.thinking_config = types.ThinkingConfig(
                 thinking_level=types.ThinkingLevel.LOW,
-                include_thoughts=True # FlashモデルでもThinkingが有効な場合があるため念のため
+                include_thoughts=True
             )
 
         response = client.models.generate_content(
@@ -323,11 +316,9 @@ def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
             config=gen_config
         )
         
-        # Thinkingが含まれる場合のパース
         title = ""
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
-                # テキストパートを採用（Thoughtパートは無視）
                 if part.text and (not hasattr(part, 'thought') or not part.thought):
                     title += part.text
         
@@ -343,39 +334,35 @@ def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
 def save_auto_history(messages, canvases, multi_code_enabled, client, current_filename=None):
     """
     履歴を自動保存する。
-    current_filenameがあればそれを使い（上書き）、なければ新規生成する。
     """
     log_dir = "chat_log"
     os.makedirs(log_dir, exist_ok=True)
     
-    # 有効な会話（System以外）の数をカウント
     valid_msgs = [m for m in messages if m["role"] != "system"]
     
-    # 2往復未満（4メッセージ未満）なら何もしない
     if len(valid_msgs) < 4:
         return None
 
-    # ファイル名が未定の場合、新規生成
     if not current_filename:
-        # 日付プレフィックス (YYDDMMに修正)
         date_prefix = datetime.datetime.now().strftime("%y%m%d")
-        
-        # タイトル生成
         chat_title = generate_chat_title(messages, client)
-        
         base_filename = f"{date_prefix}_{chat_title}.json"
         filename = get_unique_filename(log_dir, base_filename)
         current_filename = filename
     
-    # --- 変更: 履歴保存時のデータに設定フラグを追加 ---
     history_data = {
         "messages": messages,
         "python_canvases": canvases,
         "multi_code_enabled": multi_code_enabled,
         "enable_more_research": st.session_state.get('enable_more_research', False),
+        "enable_report_pdf": st.session_state.get('enable_report_pdf', False),
         "enable_google_search": st.session_state.get('enable_google_search', False),
         "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
         "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
+        "current_model_id": st.session_state.get('current_model_id'),
+        "selected_env_file": st.session_state.get('selected_env_file'),
+        "auto_save_enabled": st.session_state.get('auto_save_enabled', True),
+        "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False),
         "saved_at": datetime.datetime.now().isoformat()
     }
     
@@ -389,44 +376,34 @@ def save_auto_history(messages, canvases, multi_code_enabled, client, current_fi
         print(f"Auto-save failed: {e}")
         return current_filename
 
-# --- 新規追加: チャット分岐用のファイル名生成関数 ---
-
 def generate_branch_filename(current_filename, log_dir="chat_log"):
     """
-    現在のファイル名から、新しい分岐ファイル名（日付6桁_タイトル-●●.json）を生成する。
-    既存の枝番を無視してベースタイトルを抽出し、フラットに連番を振る。
+    現在のファイル名から、新しい分岐ファイル名を生成する。
     """
     today_str = datetime.datetime.now().strftime("%y%m%d")
-    base_title = "分岐チャット" # デフォルト値
+    base_title = "分岐チャット"
 
     if current_filename:
-        # 拡張子を除外
         name_no_ext = os.path.splitext(current_filename)[0]
-        
-        # 正規表現で「(日付6桁_)(ベースタイトル)(-数字2桁)」を分解してベースタイトルを抽出
         match = re.match(r'^(?:\d{6}_)?(.*?)(?:-\d{2,})?$', name_no_ext)
         if match and match.group(1):
             base_title = match.group(1)
         else:
             base_title = name_no_ext
 
-    # 既存の分岐ファイルを検索して最大の枝番を見つける
     pattern = os.path.join(log_dir, f"*_{base_title}-*.json")
     existing_files = glob.glob(pattern)
     
-    max_branch = 1 # オリジナルを1とみなす
+    max_branch = 1
     for f in existing_files:
         basename = os.path.basename(f)
         name_no_ext = os.path.splitext(basename)[0]
-        
-        # 末尾のハイフンと数字を抽出
         suffix_match = re.search(r'-(\d{2,})$', name_no_ext)
         if suffix_match:
             num = int(suffix_match.group(1))
             if num > max_branch:
                 max_branch = num
 
-    # 次の枝番を決定（99を超えた場合はそのまま3桁表示にする安全設計）
     next_branch = max_branch + 1
     branch_str = f"{next_branch:02d}"
     

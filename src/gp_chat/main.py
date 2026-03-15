@@ -1,3 +1,4 @@
+# main.py:
 import os
 import sys
 import base64
@@ -19,6 +20,7 @@ try:
     from gp_chat import code_agent
     from gp_chat import research_agent
     from gp_chat import reasoning_agent
+    from gp_chat import report_agent
 except ImportError:
     import config
     import utils
@@ -28,6 +30,7 @@ except ImportError:
     import code_agent
     import research_agent
     import reasoning_agent
+    import report_agent
 
 def run_chatbot_app():
     st.set_page_config(page_title=config.UITexts.APP_TITLE, layout="wide")
@@ -52,6 +55,8 @@ def run_chatbot_app():
     for key, value in config.SESSION_STATE_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
+    if "enable_report_pdf" not in st.session_state:
+        st.session_state["enable_report_pdf"] = False
 
     # Canvas読み込み時の文字コード対応関数
     def handle_canvas_upload(index, key):
@@ -132,7 +137,7 @@ def run_chatbot_app():
         # target_index までのメッセージを抽出 (切り取り)
         new_messages = st.session_state['messages'][:target_index + 1]
         
-        # 新しいファイル名の生成 (utils.py に実装した関数を呼び出し)
+        # 新しいファイル名の生成
         current_file = st.session_state.get('current_chat_filename')
         new_filename = utils.generate_branch_filename(current_file, "chat_log")
         
@@ -142,9 +147,14 @@ def run_chatbot_app():
             "python_canvases": st.session_state.get('python_canvases', []),
             "multi_code_enabled": st.session_state.get('multi_code_enabled', False),
             "enable_more_research": st.session_state.get('enable_more_research', False),
+            "enable_report_pdf": st.session_state.get('enable_report_pdf', False),
             "enable_google_search": st.session_state.get('enable_google_search', False),
             "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
             "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
+            "current_model_id": st.session_state.get('current_model_id'),
+            "selected_env_file": st.session_state.get('selected_env_file'),
+            "auto_save_enabled": st.session_state.get('auto_save_enabled', True),
+            "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False),
             "saved_at": datetime.datetime.now().isoformat()
         }
         
@@ -158,6 +168,7 @@ def run_chatbot_app():
             # セッションステートの更新
             st.session_state['messages'] = new_messages
             st.session_state['current_chat_filename'] = new_filename
+            st.session_state['current_report_folder'] = os.path.splitext(new_filename)[0]
             
             # 累積トークン数の再計算
             total_tokens = sum(
@@ -184,7 +195,6 @@ def run_chatbot_app():
                             st.image(base64.b64decode(img_b64), use_container_width=True)
                         except Exception as e:
                             st.error(f"画像表示エラー: {e}")
-                # -------------------------------
 
                 if "grounding_metadata" in msg and msg["grounding_metadata"]:
                     with st.expander("🔎 検索ソース (Grounding)"):
@@ -201,8 +211,7 @@ def run_chatbot_app():
                         f"📤 **Output (Response):** {u['output_tokens']:,} / {OUTPUT_LIMIT:,} ({out_p:.2f}%)"
                     )
                     
-                    # --- 新規追加: 分岐ボタン ---
-                    # 生成中でない場合のみボタンを表示・有効化
+                    # 生成中でない場合のみボタンを表示
                     if not st.session_state.get('is_generating', False):
                         if st.button("✂️ この会話から分岐", key=f"branch_btn_{i}", help="この回答までの履歴で新しいチャットを生成・保存します"):
                             handle_branching(i)
@@ -232,8 +241,7 @@ def run_chatbot_app():
                 del st.session_state['draft_input']
                 st.rerun()
                 
-        # --- 修正点②: フォーム表示後に強制的に最下段へスクロールするより堅牢なJSハック ---
-        # フォームの直下にこのコンポーネントを置くことで、確実に一番下までスクロールさせます
+        # 強制的に最下段へスクロールするJSハック
         st.components.v1.html(
             """
             <script>
@@ -241,8 +249,6 @@ def run_chatbot_app():
                 try {
                     const doc = window.parent.document;
                     let scrolled = false;
-                    
-                    // 自分自身のiframeを探して、そこまでスクロールさせる（クラス名に依存しない方法）
                     const iframes = doc.querySelectorAll('iframe');
                     for (let i = 0; i < iframes.length; i++) {
                         if (iframes[i].contentWindow === window) {
@@ -251,8 +257,6 @@ def run_chatbot_app():
                             break;
                         }
                     }
-                    
-                    // iframeが見つからなかった場合のフォールバック
                     if (!scrolled) {
                         const mainContainer = doc.querySelector('.stApp [data-testid="stMainBlockContainer"]') || doc.querySelector('.main .block-container');
                         if (mainContainer) {
@@ -260,12 +264,11 @@ def run_chatbot_app():
                         }
                     }
                 } catch (e) {}
-            }, 300); // UIの描画完了を待つために0.3秒遅延させる
+            }, 300);
             </script>
             """,
             height=0
         )
-        # -------------------------------------------------------------------------
     
     else:
         if prompt := st.chat_input("指示を入力...", disabled=st.session_state['is_generating']):
@@ -279,11 +282,7 @@ def run_chatbot_app():
         with c_stop:
             if st.button("■ 送信取り消し", key="stop_generating_btn", type="primary"):
                 st.session_state['is_generating'] = False
-                
-                # --- 修正点①: 二重リロードを防ぐため、ここで即座にリカバリー処理を実行 ---
                 state_manager.recover_interrupted_session()
-                # -------------------------------------------------------------------------
-                
                 st.rerun()
         with c_info:
             st.info("生成中... 「送信取り消し」を押すと中断し、テキストを復元します。")
@@ -311,6 +310,7 @@ def run_chatbot_app():
 
             is_more_research = st.session_state.get('enable_more_research', False) and not is_special_mode
             effort = st.session_state.get('reasoning_effort', 'high')
+            is_report_mode = st.session_state.get('enable_report_pdf', False) and not is_special_mode
             is_deep_reasoning = (effort == 'deep') and not is_more_research and not is_special_mode
 
             chat_contents = []
@@ -347,7 +347,6 @@ def run_chatbot_app():
             if not is_special_mode:
                 context_parts = []
                 for i, code in enumerate(st.session_state['python_canvases']):
-                    # トグルがONになっているか確認 (デフォルトはTrue)
                     is_enabled = st.session_state.get('canvas_enabled', [])[i] if i < len(st.session_state.get('canvas_enabled', [])) else True
                     
                     if is_enabled and code.strip() and code != config.ACE_EDITOR_DEFAULT_CODE:
@@ -389,8 +388,20 @@ def run_chatbot_app():
 
                 final_grounding_metadata = None
 
-                if is_more_research:
-                    # Deep Researchエージェントに処理を委譲
+                if is_report_mode:
+                    full_response, usage_metadata, _report_metadata = report_agent.run_report_generation(
+                        client=client,
+                        model_id=model_id,
+                        prompts=PROMPTS,
+                        chat_contents=chat_contents,
+                        messages=target_messages,
+                        system_instruction=system_instruction,
+                        max_output_tokens=max_tokens_val,
+                        text_placeholder=text_placeholder,
+                        thought_status=thought_status
+                    )
+                    thought_area_container.empty()
+                elif is_more_research:
                     full_response, usage_metadata, final_grounding_metadata = research_agent.run_deep_research(
                         client=client,
                         model_id=model_id,
@@ -402,7 +413,6 @@ def run_chatbot_app():
                         thought_placeholder=thought_placeholder
                     )
                 elif is_deep_reasoning:
-                    # Deep Reasoningエージェントに処理を委譲
                     full_response, usage_metadata, final_grounding_metadata = reasoning_agent.run_deep_reasoning(
                         client=client,
                         model_id=model_id,
@@ -414,16 +424,13 @@ def run_chatbot_app():
                         thought_placeholder=thought_placeholder
                     )
                 else:
-                    # 通常のストリーミング生成
                     stream = client.models.generate_content_stream(
                         model=model_id,
                         contents=chat_contents,
                         config=gen_config
                     )
 
-                    chunk_count = 0
                     for chunk in stream:
-                        chunk_count += 1
                         if chunk.usage_metadata:
                             usage_metadata = chunk.usage_metadata
                         
@@ -480,7 +487,6 @@ def run_chatbot_app():
                         if last_meta.web_search_queries:
                             final_grounding_metadata["queries"] = last_meta.web_search_queries
 
-                # SearchとDeep Research両方に対応した共通のGrounding表示
                 if final_grounding_metadata and (final_grounding_metadata.get("sources") or final_grounding_metadata.get("queries")):
                     with st.expander("🔎 検索ソース (Grounding)"):
                         st.json(final_grounding_metadata)
@@ -502,6 +508,8 @@ def run_chatbot_app():
                     assistant_msg["usage"] = current_usage
                 if final_grounding_metadata:
                     assistant_msg["grounding_metadata"] = final_grounding_metadata
+                if is_report_mode:
+                    assistant_msg["report_mode"] = True
                 
                 if is_special_mode:
                     for m in target_messages:
@@ -509,23 +517,17 @@ def run_chatbot_app():
                             st.session_state['messages'].append(m)
                     st.session_state['messages'].append(assistant_msg)
                     del st.session_state['special_generation_messages']
-                    state_manager.add_debug_log("Special validation messages merged to history.")
                 else:
                     st.session_state['messages'].append(assistant_msg)
                     
-                    # --- 送信完了後、全てのCanvasを自動で無効(OFF)にする ---
-                    if 'canvas_enabled' in st.session_state:
+                    # 送信完了後、全てのCanvasを自動で無効(OFF)にする (常時ONモードがOFFの場合のみ)
+                    if 'canvas_enabled' in st.session_state and not st.session_state.get('always_send_all_canvases', False):
                         c_key = st.session_state.get('canvas_key_counter', 0)
                         for i in range(len(st.session_state['canvas_enabled'])):
                             st.session_state['canvas_enabled'][i] = False
-                            
-                            # Streamlitウィジェットの内部状態(key)も明示的にOFFにする
-                            en_key_multi = f"en_cvs_{i}_{c_key}"
-                            st.session_state[en_key_multi] = False
-                            
+                            st.session_state[f"en_cvs_{i}_{c_key}"] = False
                             if i == 0:
-                                en_key_single = f"en_cvs_s_{c_key}"
-                                st.session_state[en_key_single] = False
+                                st.session_state[f"en_cvs_s_{c_key}"] = False
                     
                     if st.session_state.get('auto_save_enabled', True):
                         current_file = st.session_state.get('current_chat_filename')
@@ -538,18 +540,20 @@ def run_chatbot_app():
                         )
                         if new_filename:
                             st.session_state['current_chat_filename'] = new_filename
+                            st.session_state['current_report_folder'] = os.path.splitext(new_filename)[0]
 
                 if 'uploaded_file_queue' in st.session_state:
                      st.session_state['uploaded_file_queue'] = []
+                     # これによりUI上のアップローダーを強制リセットし無限送信を防ぐ
+                     st.session_state['file_uploader_key'] = st.session_state.get('file_uploader_key', 0) + 1
                 if 'clipboard_queue' in st.session_state:
                      st.session_state['clipboard_queue'] = []
 
-                # --- 実行エンジンの統合 (モードONの場合) ---
+                # 実行エンジンの統合
                 auto_plot = st.session_state.get('auto_plot_enabled', False)
                 state_manager.add_debug_log(f"[DEBUG] Auto Plot Enabled: {auto_plot}, Special Mode: {is_special_mode}")
-
-                if auto_plot and not is_special_mode:
-                    # code_agent に委譲
+                
+                if auto_plot and not is_special_mode and not is_report_mode:
                     code_agent.run_auto_plot_agent(
                         client=client,
                         model_id=model_id,

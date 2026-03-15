@@ -1,3 +1,4 @@
+# state_manager.py:
 import os
 import json
 import time
@@ -37,12 +38,21 @@ def load_history(uploader_key):
             # 保存された各種設定フラグを復元
             if "enable_more_research" in loaded_data:
                 st.session_state['enable_more_research'] = loaded_data["enable_more_research"]
+            st.session_state['enable_report_pdf'] = loaded_data.get("enable_report_pdf", False)
             if "enable_google_search" in loaded_data:
                 st.session_state['enable_google_search'] = loaded_data["enable_google_search"]
             if "reasoning_effort" in loaded_data:
                 st.session_state['reasoning_effort'] = loaded_data["reasoning_effort"]
             if "auto_plot_enabled" in loaded_data:
                 st.session_state['auto_plot_enabled'] = loaded_data["auto_plot_enabled"]
+            if "current_model_id" in loaded_data:
+                st.session_state['current_model_id'] = loaded_data["current_model_id"]
+            if "selected_env_file" in loaded_data:
+                st.session_state['selected_env_file'] = loaded_data["selected_env_file"]
+            if "auto_save_enabled" in loaded_data:
+                st.session_state['auto_save_enabled'] = loaded_data["auto_save_enabled"]
+            if "always_send_all_canvases" in loaded_data:
+                st.session_state['always_send_all_canvases'] = loaded_data["always_send_all_canvases"]
 
             st.success(config.UITexts.HISTORY_LOADED_SUCCESS)
             st.session_state['system_role_defined'] = True
@@ -50,6 +60,8 @@ def load_history(uploader_key):
             
             if 'current_chat_filename' in st.session_state:
                 del st.session_state['current_chat_filename']
+            if 'current_report_folder' in st.session_state:
+                del st.session_state['current_report_folder']
                 
             add_debug_log("Session restored from Uploaded JSON.")
 
@@ -79,18 +91,28 @@ def load_history_from_local(filename):
             # 保存された各種設定フラグを復元
             if "enable_more_research" in loaded_data:
                 st.session_state['enable_more_research'] = loaded_data["enable_more_research"]
+            st.session_state['enable_report_pdf'] = loaded_data.get("enable_report_pdf", False)
             if "enable_google_search" in loaded_data:
                 st.session_state['enable_google_search'] = loaded_data["enable_google_search"]
             if "reasoning_effort" in loaded_data:
                 st.session_state['reasoning_effort'] = loaded_data["reasoning_effort"]
             if "auto_plot_enabled" in loaded_data:
                 st.session_state['auto_plot_enabled'] = loaded_data["auto_plot_enabled"]
+            if "current_model_id" in loaded_data:
+                st.session_state['current_model_id'] = loaded_data["current_model_id"]
+            if "selected_env_file" in loaded_data:
+                st.session_state['selected_env_file'] = loaded_data["selected_env_file"]
+            if "auto_save_enabled" in loaded_data:
+                st.session_state['auto_save_enabled'] = loaded_data["auto_save_enabled"]
+            if "always_send_all_canvases" in loaded_data:
+                st.session_state['always_send_all_canvases'] = loaded_data["always_send_all_canvases"]
 
             st.success(f"Loaded: {filename}")
             st.session_state['system_role_defined'] = True
             st.session_state['canvas_key_counter'] += 1
             
             st.session_state['current_chat_filename'] = filename
+            st.session_state['current_report_folder'] = os.path.splitext(filename)[0]
             
             add_debug_log(f"Session restored from local file: {filename}")
             
