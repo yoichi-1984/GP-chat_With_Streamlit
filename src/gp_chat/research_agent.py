@@ -9,220 +9,213 @@ try:
 except ImportError:
     import state_manager
 
-def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instruction, 
-                       text_placeholder, thought_status, thought_placeholder):
+def run_deep_research(client, model_id, gen_config, chat_contents, system_instruction, 
+                      text_placeholder, thought_status, thought_placeholder):
     """
-    推論特化モード (Deep Reasoning) 用のエージェント。
-    提案A (自己批判) と 提案B (多角的仮説の検証) のハイブリッド。
-    
-    1. Brainstorming: 3つの異なるアプローチを生成
-    2. Exploration & Critique: 各アプローチを深掘りし、弱点を自己批判
-    3. Integration: 全評価を踏まえた最終結論の生成
+    徹底調査モード (More Research) 用のエージェント。
+    1. Dynamic Research: 情報の過不足を評価しながら、動的な検索ループ(ReAct)を実行
+    2. Synthesis: 収集した全情報と推論ルールを用いて最終回答を生成
     
     Returns:
         tuple: (full_response, usage_metadata, combined_grounding_metadata)
     """
-    state_manager.add_debug_log("[Deep Reasoning] Starting hybrid reasoning agent...")
+    state_manager.add_debug_log("[Deep Research] Starting dynamic ReAct agent...")
     
     total_usage = {"input": 0, "output": 0, "total": 0}
     combined_grounding = {"sources": [], "queries": []}
-    full_thought_log = "### 🧠 Deep Reasoning Process\n\n"
+    full_thought_log = "### 🧠 Deep Research Process\n\n"
     
-    # Reasoningモードのベース設定 (Web検索がONの場合は gen_config.tools に引き継がれている)
-    base_config = types.GenerateContentConfig(
-        max_output_tokens=gen_config.max_output_tokens,
-        temperature=gen_config.temperature,
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=True),
-        tools=gen_config.tools # Web検索ツールを適用
-    )
-
-    def extract_grounding_info(candidate):
-        """レスポンスからGrounding情報を抽出してcombined_groundingに追加するヘルパー"""
-        if candidate and candidate.grounding_metadata:
-            g_meta = candidate.grounding_metadata
-            if g_meta.web_search_queries:
-                combined_grounding["queries"].extend(g_meta.web_search_queries)
-            if g_meta.grounding_chunks:
-                for chunk in g_meta.grounding_chunks:
-                    if chunk.web:
-                        if not any(s['uri'] == chunk.web.uri for s in combined_grounding["sources"]):
-                            combined_grounding["sources"].append({"title": chunk.web.title, "uri": chunk.web.uri})
-
     # ---------------------------------------------------------
-    # Phase 1: Brainstorming (多角的なアプローチの立案)
+    # Phase 1: Dynamic Research Loop (ReAct型深掘り)
     # ---------------------------------------------------------
-    thought_status.update(label="🤔 多角的なアプローチを考案中 (Brainstorming)...", state="running")
-    full_thought_log += "**[Phase 1: Brainstorming]**\n問題解決のための異なる3つのアプローチ（解法や視点）を立案しています...\n"
+    full_thought_log += "**[Phase 1: Dynamic Research]**\n情報の過不足を評価しながら、動的に検索と深掘りを繰り返します...\n"
     thought_placeholder.markdown(full_thought_log)
     
-    # 汎用化: コンサルタント縛りを外し、純粋な推論エンジンとして多角的なアプローチを要求
-    brainstorm_prompt = (
-        "あなたは世界最高峰の論理的推論能力を持つAIシステムです。\n"
-        "ユーザーの直近の要求を解決するために、異なる3つのアプローチ（解法、設計、または視点）を立案してください。\n"
-        "例えば、「処理効率・簡潔さを重視するアプローチ」「網羅性・堅牢性を重視するアプローチ」「前提条件そのものを疑うアプローチ」など、多角的な視点からアプローチを生成してください。"
-    )
+    MAX_ITERATIONS = 3
+    iteration = 0
+    research_results = []
+    executed_queries = set()
     
-    brainstorm_contents = chat_contents[-3:] if len(chat_contents) > 3 else chat_contents
-    brainstorm_contents = brainstorm_contents + [types.Content(role="user", parts=[types.Part.from_text(text=brainstorm_prompt)])]
-    
-    brainstorm_config = types.GenerateContentConfig(
+    # 評価・計画用のJSONスキーマ
+    react_config = types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema={
             "type": "OBJECT",
             "properties": {
-                "approaches": {
-                    "type": "ARRAY",
-                    "items": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "name": {"type": "STRING", "description": "アプローチの短い名称"},
-                            "description": {"type": "STRING", "description": "アプローチの概要と狙い"}
-                        },
-                        "required": ["name", "description"]
-                    }
-                }
+                "status": {"type": "STRING", "description": "'needs_more_info' or 'sufficient'"},
+                "next_queries": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "reasoning": {"type": "STRING", "description": "現在の状況と次のアクション(検索)を決定した理由"}
             },
-            "required": ["approaches"]
+            "required": ["status", "next_queries", "reasoning"]
         },
-        temperature=0.4, # アイデア出しのため少しだけ高めに
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=True),
-        tools=gen_config.tools # Web検索ツールを適用
+        temperature=0.2,
     )
     
-    approaches = []
-    try:
-        bs_response = client.models.generate_content(
-            model=model_id,
-            contents=brainstorm_contents,
-            config=brainstorm_config
-        )
-        
-        if bs_response.usage_metadata:
-            total_usage["input"] += (bs_response.usage_metadata.prompt_token_count or 0)
-            total_usage["output"] += (bs_response.usage_metadata.candidates_token_count or 0)
-            
-        if bs_response.candidates:
-            extract_grounding_info(bs_response.candidates[0])
-            
-        # --- 修正箇所 [P2]: JSONパースの堅牢化 ---
-        raw_text = bs_response.text
-        clean_text = raw_text.strip()
-        if clean_text.startswith("```"):
-            lines = clean_text.split('\n')
-            if len(lines) >= 3:
-                clean_text = '\n'.join(lines[1:-1]).strip()
-            else:
-                clean_text = clean_text.replace("```json", "").replace("```", "").strip()
-        
-        start_idx = clean_text.find('{')
-        end_idx = clean_text.rfind('}')
-        if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
-            clean_text = clean_text[start_idx:end_idx+1]
-        else:
-            raise ValueError("No JSON object found in the response.")
-
-        bs_data = json.loads(clean_text)
-        # ----------------------------------------
-        
-        approaches = bs_data.get("approaches", [])[:3] # 最大3つ
-        if not approaches:
-            raise ValueError("Parsed JSON does not contain valid approaches.")
-        
-        for i, app in enumerate(approaches):
-            full_thought_log += f"* **アプローチ{i+1} [{app['name']}]:** {app['description']}\n"
-            
-        thought_placeholder.markdown(full_thought_log)
-        state_manager.add_debug_log(f"[Deep Reasoning] Brainstormed approaches: {[a['name'] for a in approaches]}")
-        
-    except Exception as e:
-        state_manager.add_debug_log(f"[Deep Reasoning] Brainstorming failed: {e}", "error")
-        approaches = [{"name": "論理的アプローチ", "description": "与えられた制約の中で論理的に問題を解決する標準的なアプローチ"}]
-        full_thought_log += f"⚠️ アプローチの生成に失敗しました。標準的な推論で進行します。\n\n"
-
-    # ---------------------------------------------------------
-    # Phase 2: Exploration & Critique (深掘りと自己批判)
-    # ---------------------------------------------------------
-    full_thought_log += "\n**[Phase 2: Exploration & Critique]**\n各アプローチを深く検証し、潜在的な問題点を自己批判（Critique）します...\n"
-    thought_placeholder.markdown(full_thought_log)
-    
-    critique_results = []
-    
-    critique_config = types.GenerateContentConfig(
-        temperature=0.2, # 評価は厳密に
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=True),
-        tools=gen_config.tools # Web検索ツールを適用
+    # 検索実行用のコンフィグ
+    exec_config = types.GenerateContentConfig(
+        temperature=0.1,
+        tools=[types.Tool(google_search=types.GoogleSearch())]
     )
-    
-    for i, app in enumerate(approaches):
-        thought_status.update(label=f"⚖️ アプローチの検証・批判 {i+1}/{len(approaches)}...", state="running")
-        full_thought_log += f"\n* 🔍 **検証中:** {app['name']}\n"
-        thought_placeholder.markdown(full_thought_log)
+
+    while iteration < MAX_ITERATIONS:
+        iteration += 1
+        thought_status.update(label=f"🔄 調査サイクル {iteration}/{MAX_ITERATIONS} を実行中...", state="running")
         
-        critique_prompt = (
-            f"ユーザーの要求に対する解決策として、以下のアプローチを検討しています。\n"
-            f"【アプローチ名】: {app['name']}\n"
-            f"【概要】: {app['description']}\n\n"
-            "このアプローチを深く推論して具体化し、その後に**あえて厳しく自己批判（潜在的なリスク、論理の飛躍、エッジケースでの破綻など）**を行ってください。\n"
-            "「具体化された推論」と「自己批判・弱点」の2つを明確に分けて記述してください。"
+        # --- 評価・計画 ---
+        current_knowledge = "\n\n".join(research_results) if research_results else "（まだ調査結果はありません）"
+        
+        react_prompt = (
+            "あなたは優秀なリサーチャーです。ユーザーの最新の要求に対して、完璧な裏付けのある回答を作成するための情報を集めています。\n"
+            "これまでに以下の調査結果が得られています：\n"
+            "-----------------\n"
+            f"{current_knowledge}\n"
+            "-----------------\n"
+            "【あなたのタスク】\n"
+            "上記の情報を踏まえ、ユーザーの要求に完全に答えるために情報が十分か判定してください。\n"
+            "もし情報が不足している、事実の裏付けが弱い、または新たに深掘りすべき疑問点が浮上した場合は、"
+            "それを解決するためのGoogle検索クエリを1〜3個提案してください。\n"
+            "情報が十分に揃ったと判断した場合は、statusを'sufficient'にし、next_queriesは空にしてください。\n"
         )
+        
+        # 直近のやり取りを元にメッセージ構築
+        react_contents = chat_contents[-3:] if len(chat_contents) > 3 else chat_contents
+        react_contents = react_contents + [types.Content(role="user", parts=[types.Part.from_text(text=react_prompt)])]
         
         try:
-            cr_response = client.models.generate_content(
+            react_response = client.models.generate_content(
                 model=model_id,
-                contents=chat_contents + [types.Content(role="user", parts=[types.Part.from_text(text=critique_prompt)])],
-                config=critique_config
+                contents=react_contents,
+                config=react_config
             )
-            
-            if cr_response.usage_metadata:
-                total_usage["input"] += (cr_response.usage_metadata.prompt_token_count or 0)
-                total_usage["output"] += (cr_response.usage_metadata.candidates_token_count or 0)
+            if react_response.usage_metadata:
+                total_usage["input"] += (react_response.usage_metadata.prompt_token_count or 0)
+                total_usage["output"] += (react_response.usage_metadata.candidates_token_count or 0)
+                
+            # --- JSONパースの堅牢化 (クラッシュ防止対策) ---
+            raw_text = react_response.text
+            try:
+                clean_text = raw_text.strip()
+                # Markdownのコードブロック表現を取り除く
+                if clean_text.startswith("```"):
+                    lines = clean_text.split('\n')
+                    if len(lines) >= 3:
+                        clean_text = '\n'.join(lines[1:-1]).strip()
+                    else:
+                        clean_text = clean_text.replace("```json", "").replace("```", "").strip()
+                
+                # 前後にテキストが混じっていてもJSONオブジェクト部分だけを抽出する
+                start_idx = clean_text.find('{')
+                end_idx = clean_text.rfind('}')
+                if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
+                    clean_text = clean_text[start_idx:end_idx+1]
+                else:
+                    raise ValueError("No JSON object found in the response.")
 
-            if cr_response.candidates:
-                extract_grounding_info(cr_response.candidates[0])
-
-            result_text = cr_response.text
-            critique_results.append(f"【アプローチ: {app['name']} の検証と自己批判】\n{result_text}")
+                react_data = json.loads(clean_text)
+            except Exception as e:
+                state_manager.add_debug_log(f"[Deep Research] JSON Parse Error: {e}. Raw text: {raw_text[:100]}...", "error")
+                # パースに失敗した場合は、クラッシュさせずに安全なデフォルト値を設定する
+                react_data = {
+                    "status": "sufficient", # パースエラーが続くのを防ぐため、一旦十分として次へ進める
+                    "next_queries": [], 
+                    "reasoning": f"AIの判断結果（JSON）の解析に失敗したため、現在の情報で統合フェーズへ移行します。({e})"
+                }
+            # ----------------------------------------------
             
-            # 長すぎる場合はUI表示を切り詰める
-            disp_text = result_text[:120].replace('\n', ' ') + "..." if len(result_text) > 120 else result_text
-            full_thought_log += f"  * 📝 評価: {disp_text}\n"
+            status = react_data.get("status", "needs_more_info")
+            next_queries = react_data.get("next_queries", [])
+            reasoning = react_data.get("reasoning", "")
+            
+            # AIの判断理由をUIに表示
+            full_thought_log += f"\n**[Cycle {iteration}] AIの思考:** {reasoning}\n"
             thought_placeholder.markdown(full_thought_log)
+            state_manager.add_debug_log(f"[Deep Research] Cycle {iteration} reasoning: {reasoning}")
             
-            time.sleep(1) # APIレートリミット対策
-            
+            # 終了判定
+            if status == "sufficient" or not next_queries:
+                full_thought_log += "✅ 情報が十分に揃ったと判断しました。調査ループを終了します。\n"
+                thought_placeholder.markdown(full_thought_log)
+                break
+                
+            # --- 検索の実行 ---
+            # 過去に実行したクエリはスキップし、最大3個までに制限
+            queries_to_run = [q for q in next_queries if q not in executed_queries][:3]
+            if not queries_to_run:
+                full_thought_log += "⚠️ 新しい検索クエリがありません。調査ループを終了します。\n"
+                thought_placeholder.markdown(full_thought_log)
+                break
+                
+            for query in queries_to_run:
+                executed_queries.add(query)
+                full_thought_log += f"* 🔍 検索実行: `{query}`\n"
+                thought_placeholder.markdown(full_thought_log)
+                
+                exec_prompt = f"以下のクエリでGoogle検索を行い、判明した重要な事実、データ、見解を詳細に要約してリストアップしてください。\nクエリ: {query}"
+                exec_response = client.models.generate_content(
+                    model=model_id,
+                    contents=[types.Content(role="user", parts=[types.Part.from_text(text=exec_prompt)])],
+                    config=exec_config
+                )
+                
+                if exec_response.usage_metadata:
+                    total_usage["input"] += (exec_response.usage_metadata.prompt_token_count or 0)
+                    total_usage["output"] += (exec_response.usage_metadata.candidates_token_count or 0)
+                
+                # Grounding情報の収集
+                if exec_response.candidates and exec_response.candidates[0].grounding_metadata:
+                    g_meta = exec_response.candidates[0].grounding_metadata
+                    if g_meta.web_search_queries:
+                        combined_grounding["queries"].extend(g_meta.web_search_queries)
+                    if g_meta.grounding_chunks:
+                        for chunk in g_meta.grounding_chunks:
+                            if chunk.web:
+                                if not any(s['uri'] == chunk.web.uri for s in combined_grounding["sources"]):
+                                    combined_grounding["sources"].append({"title": chunk.web.title, "uri": chunk.web.uri})
+
+                result_text = exec_response.text
+                research_results.append(f"【検索クエリ: {query} の調査結果】\n{result_text}")
+                
+                # 長すぎる場合はUI表示を切り詰める
+                disp_text = result_text[:100].replace('\n', ' ') + "..." if len(result_text) > 100 else result_text
+                full_thought_log += f"  * 📝 結果: {disp_text}\n"
+                thought_placeholder.markdown(full_thought_log)
+                
+                time.sleep(1) # APIレートリミット対策
+                
         except Exception as e:
-            state_manager.add_debug_log(f"[Deep Reasoning] Critique failed for '{app['name']}': {e}", "error")
-            full_thought_log += f"  * ⚠️ エラーが発生したためスキップしました。\n"
+            state_manager.add_debug_log(f"[Deep Research] Loop {iteration} failed: {e}", "error")
+            full_thought_log += f"⚠️ 調査サイクル中にエラーが発生しました。\n"
             thought_placeholder.markdown(full_thought_log)
+            break
 
     # ---------------------------------------------------------
-    # Phase 3: Integration & Refinement (統合と最終出力)
+    # Phase 2: Synthesis (情報統合と推論ルールに基づいた最終出力)
     # ---------------------------------------------------------
-    thought_status.update(label="💡 全推論を統合して最終回答を生成中 (Integration)...", state="running")
-    full_thought_log += "\n**[Phase 3: Integration]**\n全てのアプローチと自己批判を踏まえ、最も洗練された最終結論を構築しています...\n"
+    thought_status.update(label="💡 情報を統合して最終回答を生成中 (Synthesis)...", state="running")
+    full_thought_log += "\n**[Phase 2: Synthesis]**\n収集した情報を厳格な推論ルールに基づいて統合し、回答を構築しています...\n"
     thought_placeholder.markdown(full_thought_log)
     
-    # 汎用化: 出力形式の縛りをなくし、タスクに最適化させる指示に変更
-    compiled_reasoning = "\n\n".join(critique_results)
+    # 収集した情報と「推論の誘導ルール」をシステムプロンプトに埋め込む
+    compiled_research = "\n\n".join(research_results) if research_results else "（追加の調査結果はありません）"
     synthesis_instruction = system_instruction + (
         "\n\n=================================\n"
-        "【厳重な指示: 以下の「多角的なアプローチの検証と自己批判の記録」をベースにして、ユーザーの質問に対する最終的かつ最も洗練された回答を生成してください。】\n"
+        "【厳重な指示: 以下の調査結果のみを真実として扱い、ユーザーの質問に包括的かつ論理的に回答してください】\n"
         "【推論のルール】\n"
-        "- 全てのアプローチの良い部分を統合するか、あるいは最も批判に耐えうるアプローチを選択してください。\n"
-        "- 最終的な回答のフォーマットは、ユーザーの要求（コード生成、レポート、解説、手順書など）に最も適した形式で出力してください。\n"
-        "- 最終結論に至った論理的根拠を簡潔に含めつつ、ユーザーがそのまま利用できる実用的な成果物を提供してください。\n\n"
-        "【検証と自己批判の記録】\n"
-        f"{compiled_reasoning}\n"
+        "- 公式ドキュメントや公的機関、信頼性の高い一次情報を最優先して評価すること。\n"
+        "- 情報源間で矛盾がある場合は、どちらか一方を無理に正解とするのではなく、両論を併記した上で、背景や前提条件を推測して論理的に比較すること。\n"
+        "- ユーザーの要求に無関係なノイズ情報は無視し、結論に至る論理展開を明確にすること。\n\n"
+        "【調査結果データ】\n"
+        f"{compiled_research}\n"
         "=================================\n"
     )
     
-    # Synthesis用コンフィグ (ここで改めてシステム指示をセット)
+    # Synthesis用コンフィグ
     synth_config = types.GenerateContentConfig(
         system_instruction=synthesis_instruction,
         max_output_tokens=gen_config.max_output_tokens,
-        temperature=0.3,
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=True),
-        tools=gen_config.tools # Web検索ツールを適用
+        temperature=0.3, # 統合フェーズは少し表現力を与える
+        tools=gen_config.tools, # GroundingをONに維持
+        thinking_config=gen_config.thinking_config
     )
     
     full_response = ""
@@ -244,7 +237,14 @@ def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instr
             cand = chunk.candidates[0]
             
             # Synthesis時のGrounding情報も追加
-            extract_grounding_info(cand)
+            if cand.grounding_metadata:
+                g_meta = cand.grounding_metadata
+                if g_meta.web_search_queries:
+                    combined_grounding["queries"].extend(g_meta.web_search_queries)
+                if g_meta.grounding_chunks:
+                    for g_chunk in g_meta.grounding_chunks:
+                        if g_chunk.web and not any(s['uri'] == g_chunk.web.uri for s in combined_grounding["sources"]):
+                            combined_grounding["sources"].append({"title": g_chunk.web.title, "uri": g_chunk.web.uri})
 
             if cand.content and cand.content.parts:
                 for part in cand.content.parts:
@@ -272,13 +272,13 @@ def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instr
             total_usage["output"] += (synth_usage.candidates_token_count or 0)
         
     except Exception as e:
-        state_manager.add_debug_log(f"[Deep Reasoning] Synthesis failed: {e}", "error")
+        state_manager.add_debug_log(f"[Deep Research] Synthesis failed: {e}", "error")
         st.error(f"Synthesis failed: {e}")
         return "", None, None
 
     # 完了ステータス
-    thought_status.update(label="推論特化処理完了 (Deep Reasoning Finished)", state="complete", expanded=False)
-    state_manager.add_debug_log("[Deep Reasoning] Agent successfully finished.")
+    thought_status.update(label="徹底調査完了 (Deep Research Finished)", state="complete", expanded=False)
+    state_manager.add_debug_log("[Deep Research] Agent successfully finished.")
 
     # 返却用にUsageを整形
     final_usage_metadata = types.GenerateContentResponseUsageMetadata(
