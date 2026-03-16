@@ -253,10 +253,13 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 "auto_save_enabled": st.session_state.get('auto_save_enabled', True),
                 "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False)
             }
+            # セッションに保存されているファイル名があればそれを使い、なければ固定名にする
+            dl_filename = st.session_state.get('current_chat_filename', 'gemini_chat_history.json')
+            
             st.download_button(
                 label=config.UITexts.DOWNLOAD_HISTORY_BUTTON,
                 data=json.dumps(history_data, ensure_ascii=False, indent=2),
-                file_name=f"gemini_chat_{int(time.time())}.json",
+                file_name=dl_filename,
                 mime="application/json",
                 use_container_width=True
             )
