@@ -236,15 +236,29 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             log_files.sort(key=lambda x: os.path.getmtime(os.path.join(log_dir, x)), reverse=True)
             
             if log_files:
-                selected_log = st.selectbox("履歴ファイルを選択", options=log_files, disabled=is_generating, key="local_history_selector", label_visibility="collapsed")
-                st.button(
-                    "読み込む", 
-                    key="load_local_history_btn", 
-                    use_container_width=True,
-                    disabled=is_generating,
-                    on_click=load_local_history,
-                    args=(selected_log,)
-                )
+                # --- 修正箇所: formを使ってselectboxによる自動rerunをブロック ---
+                def _trigger_load_local_history():
+                    # 送信ボタンが押されたタイミングで、セッションステートから最新の選択値を取り出して実行する
+                    selected_file = st.session_state.get("local_history_selector")
+                    if selected_file:
+                        load_local_history(selected_file)
+
+                # border=False オプションで、フォーム特有の枠線を消す（Streamlit 1.31+）
+                with st.form(key="local_history_form", border=False):
+                    st.selectbox(
+                        "履歴ファイルを選択", 
+                        options=log_files, 
+                        disabled=is_generating, 
+                        key="local_history_selector", 
+                        label_visibility="collapsed"
+                    )
+                    st.form_submit_button(
+                        "読み込む", 
+                        use_container_width=True,
+                        disabled=is_generating,
+                        on_click=_trigger_load_local_history
+                    )
+                # -----------------------------------------------------------
             else:
                 st.caption("（履歴ファイルはありません）")
         else:
