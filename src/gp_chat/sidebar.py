@@ -1,4 +1,3 @@
-# sidebar.py:
 import streamlit as st
 import os
 import json
@@ -87,10 +86,11 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.rerun()
 
         # --- More Research Mode と UI連動・ロック機構 ---
-        is_more_research = st.session_state.get('enable_more_research', False)
         if 'enable_report_pdf' not in st.session_state:
             st.session_state['enable_report_pdf'] = False
+        
         is_report_mode = st.session_state.get('enable_report_pdf', False)
+        is_more_research = st.session_state.get('enable_more_research', False)
 
         effort_options = ['high', 'low', 'deep']
         curr_effort = 'high' if (is_more_research or is_report_mode) else st.session_state.get('reasoning_effort', 'high')
@@ -123,7 +123,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         )
         if not is_more_research and sel_search != st.session_state.get('enable_google_search', False):
             st.session_state['enable_google_search'] = sel_search
-        st.rerun()
+            st.rerun()
 
         sel_more_research = st.checkbox(
             label=config.UITexts.MORE_RESEARCH_LABEL,
@@ -142,18 +142,18 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         sel_report_pdf = st.checkbox(
             label="レポート機能（pdf）",
-            value=st.session_state.get('enable_report_pdf', False),
+            value=is_report_mode,
             disabled=is_more_research or is_deep_reasoning,
             help="ON の間は通常回答の代わりに HTML スライドを生成し、./slide_data 配下へ HTML と PDF を保存します。" + (" (Disabled while More Research or Deep Reasoning is active)" if (is_more_research or is_deep_reasoning) else ""),
             key=f"report_pdf_chk_{c_key}"
         )
-        if sel_report_pdf != st.session_state.get('enable_report_pdf', False):
+        if sel_report_pdf != is_report_mode:
             st.session_state['enable_report_pdf'] = sel_report_pdf
             if sel_report_pdf:
                 st.session_state['enable_more_research'] = False
                 st.session_state['reasoning_effort'] = 'high'
             st.rerun()
-            
+        
         st.divider()
 
         # --- 2. 設定・履歴エリア ---
@@ -256,7 +256,8 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 "current_model_id": st.session_state.get('current_model_id'),
                 "selected_env_file": st.session_state.get('selected_env_file'),
                 "auto_save_enabled": st.session_state.get('auto_save_enabled', True),
-                "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False)
+                "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False),
+                "current_report_folder": st.session_state.get('current_report_folder')
             }
             # セッションに保存されているファイル名があればそれを使い、なければ固定名にする
             dl_filename = st.session_state.get('current_chat_filename', 'gemini_chat_history.json')
