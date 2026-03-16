@@ -1,4 +1,3 @@
-# state_manager.py:
 import os
 import json
 import time
@@ -53,8 +52,15 @@ def load_history(uploader_key):
                 st.session_state['auto_save_enabled'] = loaded_data["auto_save_enabled"]
             if "always_send_all_canvases" in loaded_data:
                 st.session_state['always_send_all_canvases'] = loaded_data["always_send_all_canvases"]
+            
+            # --- 修正箇所 [P1]: current_report_folder の残留防止 ---
             if "current_report_folder" in loaded_data:
                 st.session_state['current_report_folder'] = loaded_data["current_report_folder"]
+            else:
+                # 履歴データに無い場合は、前のセッションの情報が残らないようにクリアする
+                if 'current_report_folder' in st.session_state:
+                    del st.session_state['current_report_folder']
+            # ----------------------------------------------------
 
             canvas_count = len(st.session_state.get('python_canvases', []))
             target_len = max(canvas_count, 5)
@@ -162,4 +168,4 @@ def recover_interrupted_session():
         
         add_debug_log("Detected interrupted session. Restored draft text.")
         return True
-    return False
+    return False    
