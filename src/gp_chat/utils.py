@@ -371,9 +371,10 @@ def save_auto_history(messages, canvases, multi_code_enabled, client, current_fi
         "selected_env_file": st.session_state.get('selected_env_file'),
         "auto_save_enabled": st.session_state.get('auto_save_enabled', True),
         "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False),
+        "current_report_folder": st.session_state.get('current_report_folder'),
         "saved_at": datetime.datetime.now().isoformat()
     }
-    
+
     file_path = os.path.join(log_dir, current_filename)
     try:
         with open(file_path, "w", encoding="utf-8") as f:

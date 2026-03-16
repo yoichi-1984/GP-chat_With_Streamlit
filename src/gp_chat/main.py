@@ -155,9 +155,10 @@ def run_chatbot_app():
             "selected_env_file": st.session_state.get('selected_env_file'),
             "auto_save_enabled": st.session_state.get('auto_save_enabled', True),
             "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False),
+            "current_report_folder": st.session_state.get('current_report_folder'),
             "saved_at": datetime.datetime.now().isoformat()
         }
-        
+
         log_dir = "chat_log"
         os.makedirs(log_dir, exist_ok=True)
         new_filepath = os.path.join(log_dir, new_filename)
@@ -311,7 +312,7 @@ def run_chatbot_app():
             is_more_research = st.session_state.get('enable_more_research', False) and not is_special_mode
             effort = st.session_state.get('reasoning_effort', 'high')
             is_report_mode = st.session_state.get('enable_report_pdf', False) and not is_special_mode
-            is_deep_reasoning = (effort == 'deep') and not is_more_research and not is_special_mode
+            is_deep_reasoning = (effort == 'deep') and not is_more_research and not is_report_mode and not is_special_mode
 
             chat_contents = []
             system_instruction = ""
@@ -540,7 +541,6 @@ def run_chatbot_app():
                         )
                         if new_filename:
                             st.session_state['current_chat_filename'] = new_filename
-                            st.session_state['current_report_folder'] = os.path.splitext(new_filename)[0]
 
                 # ファイルとクリップボードのクリア処理を完全に削除（ユーザーが手動で消すまで保持する）
 

@@ -90,25 +90,26 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         is_more_research = st.session_state.get('enable_more_research', False)
         if 'enable_report_pdf' not in st.session_state:
             st.session_state['enable_report_pdf'] = False
+        is_report_mode = st.session_state.get('enable_report_pdf', False)
 
         effort_options = ['high', 'low', 'deep']
-        curr_effort = 'high' if is_more_research else st.session_state.get('reasoning_effort', 'high')
+        curr_effort = 'high' if (is_more_research or is_report_mode) else st.session_state.get('reasoning_effort', 'high')
         effort_idx = effort_options.index(curr_effort) if curr_effort in effort_options else 0
 
         sel_effort = st.selectbox(
             label="Thinking Level",
             options=effort_options,
             index=effort_idx,
-            disabled=is_more_research, 
-            help="high: 標準の推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research Mode)" if is_more_research else ""),
+            disabled=is_more_research or is_report_mode, 
+            help="high: 標準の推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research or Report Mode)" if (is_more_research or is_report_mode) else ""),
             key=f"effort_sel_{c_key}" 
         )
-        if not is_more_research and sel_effort != st.session_state.get('reasoning_effort', 'high'):
+        if not is_more_research and not is_report_mode and sel_effort != st.session_state.get('reasoning_effort', 'high'):
             st.session_state['reasoning_effort'] = sel_effort
             st.rerun()
 
-        is_deep_reasoning = st.session_state.get('reasoning_effort') == 'deep'
-        
+        is_deep_reasoning = (st.session_state.get('reasoning_effort') == 'deep') and not is_report_mode
+
         curr_search = st.session_state.get('enable_google_search', False)
         if is_more_research:
             curr_search = True
@@ -122,13 +123,13 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         )
         if not is_more_research and sel_search != st.session_state.get('enable_google_search', False):
             st.session_state['enable_google_search'] = sel_search
-            st.rerun()
+        st.rerun()
 
         sel_more_research = st.checkbox(
             label=config.UITexts.MORE_RESEARCH_LABEL,
             value=is_more_research,
-            disabled=is_deep_reasoning,
-            help=config.UITexts.MORE_RESEARCH_HELP,
+            disabled=is_deep_reasoning or is_report_mode,
+            help=config.UITexts.MORE_RESEARCH_HELP + (" (Disabled while Report PDF mode is ON)" if is_report_mode else ""),
             key=f"more_res_chk_{c_key}" 
         )
         
@@ -142,13 +143,17 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         sel_report_pdf = st.checkbox(
             label="レポート機能（pdf）",
             value=st.session_state.get('enable_report_pdf', False),
-            help="ON の間は通常回答の代わりに HTML スライドを生成し、./slide_data 配下へ HTML と PDF を保存します。",
+            disabled=is_more_research or is_deep_reasoning,
+            help="ON の間は通常回答の代わりに HTML スライドを生成し、./slide_data 配下へ HTML と PDF を保存します。" + (" (Disabled while More Research or Deep Reasoning is active)" if (is_more_research or is_deep_reasoning) else ""),
             key=f"report_pdf_chk_{c_key}"
         )
         if sel_report_pdf != st.session_state.get('enable_report_pdf', False):
             st.session_state['enable_report_pdf'] = sel_report_pdf
+            if sel_report_pdf:
+                st.session_state['enable_more_research'] = False
+                st.session_state['reasoning_effort'] = 'high'
             st.rerun()
-        
+            
         st.divider()
 
         # --- 2. 設定・履歴エリア ---

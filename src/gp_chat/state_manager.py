@@ -53,6 +53,21 @@ def load_history(uploader_key):
                 st.session_state['auto_save_enabled'] = loaded_data["auto_save_enabled"]
             if "always_send_all_canvases" in loaded_data:
                 st.session_state['always_send_all_canvases'] = loaded_data["always_send_all_canvases"]
+            if "current_report_folder" in loaded_data:
+                st.session_state['current_report_folder'] = loaded_data["current_report_folder"]
+
+            canvas_count = len(st.session_state.get('python_canvases', []))
+            target_len = max(canvas_count, 5)
+            if st.session_state.get('always_send_all_canvases', False):
+                st.session_state['canvas_enabled'] = [True] * target_len
+            else:
+                current_enabled = st.session_state.get('canvas_enabled', [])
+                st.session_state['canvas_enabled'] = [
+                    current_enabled[i] if i < len(current_enabled) else True
+                    for i in range(target_len)
+                ]
+            st.session_state['toggle_keys'] = [0] * target_len
+            st.session_state['always_send_all_canvases_ui'] = st.session_state.get('always_send_all_canvases', False)
 
             st.success(config.UITexts.HISTORY_LOADED_SUCCESS)
             st.session_state['system_role_defined'] = True
@@ -60,9 +75,7 @@ def load_history(uploader_key):
             
             if 'current_chat_filename' in st.session_state:
                 del st.session_state['current_chat_filename']
-            if 'current_report_folder' in st.session_state:
-                del st.session_state['current_report_folder']
-                
+
             add_debug_log("Session restored from Uploaded JSON.")
 
     except Exception as e:
@@ -107,13 +120,26 @@ def load_history_from_local(filename):
             if "always_send_all_canvases" in loaded_data:
                 st.session_state['always_send_all_canvases'] = loaded_data["always_send_all_canvases"]
 
+            canvas_count = len(st.session_state.get('python_canvases', []))
+            target_len = max(canvas_count, 5)
+            if st.session_state.get('always_send_all_canvases', False):
+                st.session_state['canvas_enabled'] = [True] * target_len
+            else:
+                current_enabled = st.session_state.get('canvas_enabled', [])
+                st.session_state['canvas_enabled'] = [
+                    current_enabled[i] if i < len(current_enabled) else True
+                    for i in range(target_len)
+                ]
+            st.session_state['toggle_keys'] = [0] * target_len
+            st.session_state['always_send_all_canvases_ui'] = st.session_state.get('always_send_all_canvases', False)
+
             st.success(f"Loaded: {filename}")
             st.session_state['system_role_defined'] = True
             st.session_state['canvas_key_counter'] += 1
-            
+
             st.session_state['current_chat_filename'] = filename
-            st.session_state['current_report_folder'] = os.path.splitext(filename)[0]
-            
+            st.session_state['current_report_folder'] = loaded_data.get("current_report_folder", os.path.splitext(filename)[0])
+
             add_debug_log(f"Session restored from local file: {filename}")
             
     except Exception as e:
