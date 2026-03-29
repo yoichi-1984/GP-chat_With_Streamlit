@@ -25,7 +25,7 @@ class VirtualUploadedFile:
     def getvalue(self):
         return self._data
 
-def render_sidebar(supported_types, env_files, load_history, load_local_history, handle_clear, handle_review, handle_validation, handle_file_upload):
+def render_sidebar(supported_types, env_files, load_history, load_local_history, handle_clear, handle_review, handle_validation, handle_canvas_upload):
     """Renders the sidebar with Gemini 3 specific options and model selector."""
     
     # トグルUIが操作されたときに裏のステータスを更新するコールバック
@@ -167,6 +167,17 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 if key in keys_to_keep:
                     continue
                 st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
+
+            for key in list(st.session_state.keys()):
+                if (
+                    key.startswith("plot_chk_")
+                    or key.startswith("model_sel_")
+                    or key.startswith("effort_sel_")
+                ):
+                    del st.session_state[key]
+            st.session_state['auto_plot_enabled'] = False
+            st.session_state['current_model_id'] = config.SESSION_STATE_DEFAULTS['current_model_id']
+            st.session_state['reasoning_effort'] = config.SESSION_STATE_DEFAULTS['reasoning_effort']
             
             st.session_state['canvas_key_counter'] += 1
             if "file_uploader_key" in st.session_state:
@@ -177,7 +188,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             if 'clipboard_queue' in st.session_state:
                 st.session_state['clipboard_queue'] = []
             
-            # --- 初期化漏れを完全に防ぐための追加処理 ---
             st.session_state['always_send_all_canvases'] = False
             if 'canvas_enabled' in st.session_state:
                 del st.session_state['canvas_enabled']
@@ -185,7 +195,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 del st.session_state['toggle_keys']
             if 'always_send_all_canvases_ui' in st.session_state:
                 del st.session_state['always_send_all_canvases_ui']
-            # -------------------------------------------
             
             if 'current_chat_filename' in st.session_state:
                 del st.session_state['current_chat_filename']
@@ -194,7 +203,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.session_state['enable_report_pdf'] = False
 
         st.header(config.UITexts.SIDEBAR_HEADER)
-        if st.button(config.UITexts.RESET_BUTTON_LABEL, use_container_width=True, disabled=is_generating, on_click=handle_full_reset):
+        if st.button(config.UITexts.RESET_BUTTON_LABEL, width="stretch", disabled=is_generating, on_click=handle_full_reset):
             st.rerun()
 
         # --- 追加機能: グラフ描画・データ分析モード ---
@@ -236,14 +245,11 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             log_files.sort(key=lambda x: os.path.getmtime(os.path.join(log_dir, x)), reverse=True)
             
             if log_files:
-                # --- 修正箇所: formを使ってselectboxによる自動rerunをブロック ---
                 def _trigger_load_local_history():
-                    # 送信ボタンが押されたタイミングで、セッションステートから最新の選択値を取り出して実行する
                     selected_file = st.session_state.get("local_history_selector")
                     if selected_file:
                         load_local_history(selected_file)
 
-                # border=False オプションで、フォーム特有の枠線を消す（Streamlit 1.31+）
                 with st.form(key="local_history_form", border=False):
                     st.selectbox(
                         "履歴ファイルを選択", 
@@ -254,11 +260,10 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                     )
                     st.form_submit_button(
                         "読み込む", 
-                        use_container_width=True,
+                        width="stretch",
                         disabled=is_generating,
                         on_click=_trigger_load_local_history
                     )
-                # -----------------------------------------------------------
             else:
                 st.caption("（履歴ファイルはありません）")
         else:
@@ -282,7 +287,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False),
                 "current_report_folder": st.session_state.get('current_report_folder')
             }
-            # セッションに保存されているファイル名があればそれを使い、なければ固定名にする
             dl_filename = st.session_state.get('current_chat_filename', 'gemini_chat_history.json')
             
             st.download_button(
@@ -291,7 +295,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 file_name=dl_filename,
                 mime="application/json",
                 disabled=is_generating,
-                use_container_width=True
+                width="stretch"
             )
 
         history_uploader_key = f"history_uploader_{c_key}"
@@ -327,7 +331,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         else:
             st.session_state['uploaded_file_queue'] = []
 
-        if st.button("📋 クリップボード画像を追加", use_container_width=True, disabled=is_generating, help="Win+Shift+S等でコピーした画像を読み込みます"):
+        if st.button("📋 クリップボード画像を追加", width="stretch", disabled=is_generating, help="Win+Shift+S等でコピーした画像を読み込みます"):
             try:
                 img = ImageGrab.grabclipboard()
                 if isinstance(img, Image.Image):
@@ -371,7 +375,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # --- 4. コードエディタ (Canvas) エリア ---
         st.subheader(config.UITexts.EDITOR_SUBHEADER)
         
-        # --- 新機能: 全てを常に送信するトグル ---
         if 'always_send_all_canvases' not in st.session_state:
             st.session_state['always_send_all_canvases'] = False
 
@@ -379,7 +382,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             is_all_on = st.session_state['always_send_all_canvases_ui']
             st.session_state['always_send_all_canvases'] = is_all_on
             if is_all_on:
-                # 全てのCanvasをONにする
                 for i in range(len(st.session_state['canvas_enabled'])):
                     st.session_state['canvas_enabled'][i] = True
                     st.session_state['toggle_keys'][i] += 1
@@ -409,7 +411,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         canvases = st.session_state['python_canvases']
         
-        # --- Canvasステータスとトグルキーの初期化 ---
         if 'canvas_enabled' not in st.session_state:
             st.session_state['canvas_enabled'] = [True] * max(len(canvases), 5)
         while len(st.session_state['canvas_enabled']) < len(canvases):
@@ -421,8 +422,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.session_state['toggle_keys'].append(0)
 
         if st.session_state.get('multi_code_enabled', False):
-            # 上部の追加ボタン
-            if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, disabled=is_generating, key="add_canvas_top"):
+            if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, width="stretch", disabled=is_generating, key="add_canvas_top"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
                 st.session_state['canvas_enabled'].append(True)
                 st.session_state['toggle_keys'].append(0)
@@ -433,21 +433,17 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 with col_title:
                     st.write(f"**Canvas-{i + 1}**")
                 
-                # トグルの場所を確保
                 toggle_placeholder = col_toggle.empty()
 
                 ace_key = f"ace_{i}_{st.session_state['canvas_key_counter']}"
-                # 修正: auto_update を is_generating に応じて動的に制御し、不意の rerun を防ぐ
                 updated = st_ace(value=content, key=ace_key, readonly=is_generating, auto_update=not is_generating, **config.ACE_EDITOR_SETTINGS)
                 
-                # エディタの入力判定
                 if updated != content:
                     is_meaningful_change = updated.strip() != content.strip()
                     canvases[i] = updated
                     if is_meaningful_change and not st.session_state['canvas_enabled'][i]:
                         st.session_state['canvas_enabled'][i] = True
 
-                # 裏のステータスとUIの乖離を補正
                 tk = st.session_state['toggle_keys'][i]
                 expected_key = f"cvs_tog_{i}_{tk}"
                 
@@ -467,16 +463,15 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                     )
                 
                 c1, c2, c3 = st.columns(3)
-                c1.button(config.UITexts.CLEAR_BUTTON, key=f"clr_{i}", on_click=_local_handle_clear, args=(i,), disabled=is_generating, use_container_width=True)
-                c2.button(config.UITexts.REVIEW_BUTTON, key=f"rev_{i}", on_click=handle_review, args=(i, True), disabled=is_generating, use_container_width=True)
-                c3.button(config.UITexts.VALIDATE_BUTTON, key=f"val_{i}", on_click=handle_validation, args=(i,), disabled=is_generating, use_container_width=True)
+                c1.button(config.UITexts.CLEAR_BUTTON, key=f"clr_{i}", on_click=_local_handle_clear, args=(i,), disabled=is_generating, width="stretch")
+                c2.button(config.UITexts.REVIEW_BUTTON, key=f"rev_{i}", on_click=handle_review, args=(i, True), disabled=is_generating, width="stretch")
+                c3.button(config.UITexts.VALIDATE_BUTTON, key=f"val_{i}", on_click=handle_validation, args=(i,), disabled=is_generating, width="stretch")
 
                 up_key = f"up_{i}_{st.session_state['canvas_key_counter']}"
-                st.file_uploader(f"Load into Canvas-{i+1}", type=supported_types, key=up_key, on_change=handle_file_upload, args=(i, up_key), disabled=is_generating)
+                st.file_uploader(f"Load into Canvas-{i+1}", type=supported_types, key=up_key, on_change=handle_canvas_upload, args=(i, up_key), disabled=is_generating)
                 st.divider()
 
-            # 下部の追加ボタン
-            if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, use_container_width=True, disabled=is_generating, key="add_canvas_bottom"):
+            if len(canvases) < config.MAX_CANVASES and st.button(config.UITexts.ADD_CANVAS_BUTTON, width="stretch", disabled=is_generating, key="add_canvas_bottom"):
                 canvases.append(config.ACE_EDITOR_DEFAULT_CODE)
                 st.session_state['canvas_enabled'].append(True)
                 st.session_state['toggle_keys'].append(0)
@@ -487,7 +482,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 st.session_state['python_canvases'] = [canvases[0]]
                 st.rerun()
             
-            # シングルモード
             col_title, col_toggle = st.columns([1, 1])
             with col_title:
                 st.write("**Canvas**")
@@ -495,7 +489,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             toggle_placeholder = col_toggle.empty()
 
             ace_key = f"ace_single_{st.session_state['canvas_key_counter']}"
-            # 修正: auto_update を is_generating に応じて動的に制御し、不意の rerun を防ぐ
             updated = st_ace(value=canvases[0], key=ace_key, readonly=is_generating, auto_update=not is_generating, **config.ACE_EDITOR_SETTINGS)
             
             if updated != canvases[0]:
@@ -523,12 +516,12 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 )
 
             c1, c2, c3 = st.columns(3)
-            c1.button(config.UITexts.CLEAR_BUTTON, key="clr_s", on_click=_local_handle_clear, args=(0,), disabled=is_generating, use_container_width=True)
-            c2.button(config.UITexts.REVIEW_BUTTON, key="rev_s", on_click=handle_review, args=(0, False), disabled=is_generating, use_container_width=True)
-            c3.button(config.UITexts.VALIDATE_BUTTON, key="val_s", on_click=handle_validation, args=(0,), disabled=is_generating, use_container_width=True)
+            c1.button(config.UITexts.CLEAR_BUTTON, key="clr_s", on_click=_local_handle_clear, args=(0,), disabled=is_generating, width="stretch")
+            c2.button(config.UITexts.REVIEW_BUTTON, key="rev_s", on_click=handle_review, args=(0, False), disabled=is_generating, width="stretch")
+            c3.button(config.UITexts.VALIDATE_BUTTON, key="val_s", on_click=handle_validation, args=(0,), disabled=is_generating, width="stretch")
             
             up_key = f"up_s_{st.session_state['canvas_key_counter']}"
-            st.file_uploader("Load into Canvas", type=supported_types, key=up_key, on_change=handle_file_upload, args=(0, up_key), disabled=is_generating)
+            st.file_uploader("Load into Canvas", type=supported_types, key=up_key, on_change=handle_canvas_upload, args=(0, up_key), disabled=is_generating)
             
         st.markdown("---")
         st.markdown(

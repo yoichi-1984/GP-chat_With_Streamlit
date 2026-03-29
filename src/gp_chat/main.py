@@ -1,4 +1,3 @@
-# main.py:
 import os
 import sys
 import base64
@@ -21,6 +20,18 @@ try:
     from gp_chat import research_agent
     from gp_chat import reasoning_agent
     from gp_chat import report_agent
+    from gp_chat import llm_router
+    from gp_chat import azure_runtime
+    from gp_chat import azure_fault_injection
+    from gp_chat import azure_context_builder
+    from gp_chat import azure_normal_chat
+    from gp_chat import azure_research_agent
+    from gp_chat import azure_reasoning_agent
+    from gp_chat import azure_report_agent
+    from gp_chat import azure_code_agent
+    from gp_chat import azure_history_utils
+    from gp_chat import azure_supervisor_helpers
+    from gp_chat.azure_common_types import AzureModeResult
 except ImportError:
     import config
     import utils
@@ -31,6 +42,155 @@ except ImportError:
     import research_agent
     import reasoning_agent
     import report_agent
+    import llm_router
+    import azure_runtime
+    import azure_fault_injection
+    import azure_context_builder
+    import azure_normal_chat
+    import azure_research_agent
+    import azure_reasoning_agent
+    import azure_report_agent
+    import azure_code_agent
+    import azure_history_utils
+    import azure_supervisor_helpers
+    from azure_common_types import AzureModeResult
+
+
+def _resolve_mode_name(*, is_special_mode, is_more_research, is_deep_reasoning, is_report_mode):
+    if is_report_mode:
+        return "report"
+    if is_more_research:
+        return "research"
+    if is_deep_reasoning:
+        return "reasoning"
+    if is_special_mode:
+        return "special"
+    return "normal"
+
+
+def _run_azure_mode(
+    *,
+    mode_name,
+    azure_rt,
+    prompts,
+    target_messages,
+    queue_files,
+    python_canvases,
+    canvas_enabled_flags,
+    is_special_mode,
+    auto_plot_enabled,
+    data_manager_instance,
+    enable_search,
+    effort,
+    max_output_tokens,
+    text_placeholder,
+    thought_status,
+    thought_placeholder,
+):
+    context = azure_context_builder.build_materialized_context(
+        target_messages=target_messages,
+        queue_files=queue_files,
+        python_canvases=python_canvases,
+        canvas_enabled_flags=canvas_enabled_flags,
+        is_special_mode=is_special_mode,
+        auto_plot_enabled=auto_plot_enabled,
+        data_manager_instance=data_manager_instance,
+    )
+    if context.file_attachments_meta:
+        state_manager.add_debug_log(
+            f"[Azure] Attached {len(context.file_attachments_meta)} files to the request."
+        )
+
+    if mode_name == "report":
+        assistant_text, usage_metadata, report_meta = azure_report_agent.run_report_generation(
+            runtime=azure_rt,
+            prompts=prompts,
+            context=context,
+            messages=target_messages,
+            max_output_tokens=max_output_tokens,
+            text_placeholder=text_placeholder,
+            thought_status=thought_status,
+        )
+        return AzureModeResult(
+            full_response=assistant_text,
+            system_instruction=context.system_instruction,
+            usage_metadata=usage_metadata,
+            mode_meta=report_meta,
+            available_files_map=context.available_files_map,
+            file_attachments_meta=context.file_attachments_meta,
+            retry_context_snapshot=context.clone_retry_context(),
+        )
+
+    if mode_name == "research":
+        return azure_research_agent.run_deep_research(
+            runtime=azure_rt,
+            context=context,
+            max_output_tokens=max_output_tokens,
+            text_placeholder=text_placeholder,
+            thought_status=thought_status,
+            thought_placeholder=thought_placeholder,
+        )
+
+    if mode_name == "reasoning":
+        return azure_reasoning_agent.run_deep_reasoning(
+            runtime=azure_rt,
+            context=context,
+            max_output_tokens=max_output_tokens,
+            search_enabled=enable_search,
+            text_placeholder=text_placeholder,
+            thought_status=thought_status,
+            thought_placeholder=thought_placeholder,
+        )
+
+    if mode_name == "special":
+        return azure_normal_chat.run_special_generation(
+            runtime=azure_rt,
+            context=context,
+            max_output_tokens=max_output_tokens,
+            effort=effort,
+            text_placeholder=text_placeholder,
+            thought_status=thought_status,
+            thought_placeholder=thought_placeholder,
+        )
+
+    return azure_normal_chat.run_normal_generation(
+        runtime=azure_rt,
+        context=context,
+        max_output_tokens=max_output_tokens,
+        search_enabled=enable_search,
+        effort=effort,
+        is_special_mode=False,
+        text_placeholder=text_placeholder,
+        thought_status=thought_status,
+        thought_placeholder=thought_placeholder,
+    )
+
+
+def _save_history_for_provider(
+    *,
+    used_azure_fallback,
+    azure_rt,
+    messages,
+    canvases,
+    multi_code_enabled,
+    client,
+    current_filename,
+):
+    if used_azure_fallback and azure_rt is not None:
+        return azure_history_utils.save_auto_history(
+            messages,
+            canvases,
+            multi_code_enabled,
+            azure_rt,
+            current_filename=current_filename,
+        )
+    return utils.save_auto_history(
+        messages,
+        canvases,
+        multi_code_enabled,
+        client,
+        current_filename=current_filename,
+    )
 
 def run_chatbot_app():
     st.set_page_config(page_title=config.UITexts.APP_TITLE, layout="wide")
@@ -79,11 +239,12 @@ def run_chatbot_app():
             # ファイルアップロード時も自動的に送信をONにする
             if 'canvas_enabled' in st.session_state and index < len(st.session_state['canvas_enabled']):
                 st.session_state['canvas_enabled'][index] = True
-                c_key = st.session_state.get('canvas_key_counter', 0)
+                # st.session_state['canvas_enabled'][index] = True
+                #c_key = st.session_state.get('canvas_key_counter', 0)
                 # ウィジェットのセッションステートも更新
-                st.session_state[f"en_cvs_{index}_{c_key}"] = True
-                if index == 0:
-                    st.session_state[f"en_cvs_s_{c_key}"] = True
+                #st.session_state[f"en_cvs_{index}_{c_key}"] = True
+                #if index == 0:
+                #    st.session_state[f"en_cvs_s_{c_key}"] = True
 
     sidebar.render_sidebar(
         supported_extensions, env_files, 
@@ -101,18 +262,28 @@ def run_chatbot_app():
             st.rerun()
     
     # --- .env ロードと Client 初期化 ---
-    load_dotenv(dotenv_path=st.session_state.get('selected_env_file', env_files[0]), override=True)
+    selected_env_file = st.session_state.get('selected_env_file', env_files[0])
+    load_dotenv(dotenv_path=selected_env_file, override=True)
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
     model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3-pro-preview"))
+    azure_rt = azure_runtime.load_azure_runtime_from_env(
+        bootstrap_env_path=selected_env_file,
+        logger=state_manager.add_debug_log,
+    )
+    fault_injection_cfg = azure_fault_injection.load_fault_injection_config()
     
     INPUT_LIMIT = 1000000
     OUTPUT_LIMIT = 65536
     max_tokens_val = min(int(os.getenv("MAX_TOKEN", "65536")), OUTPUT_LIMIT)
 
     try:
-        client = genai.Client(vertexai=True, project=project_id, location=location)
+        llm_clients = llm_router.build_llm_clients(
+            project_id=project_id,
+            location=location,
+        )
+        client = llm_clients.standard_client
     except Exception as e:
         st.error(f"Client init error: {e}")
         st.stop()
@@ -120,6 +291,32 @@ def run_chatbot_app():
     st.caption(f"Backend: {model_id} | Location: {location}")
 
     with st.expander("🛠 システムログ", expanded=False):
+        st.caption(f"Current Model: {model_id} | Location: {location}")
+        last_usage_info = st.session_state.get("last_usage_info")
+        if last_usage_info:
+            debug_summary_parts = [
+                f"prompt={last_usage_info.get('input_tokens', 0):,}",
+                f"output={last_usage_info.get('output_tokens', 0):,}",
+                f"total={last_usage_info.get('total_tokens', 0):,}",
+            ]
+            if last_usage_info.get("llm_route"):
+                debug_summary_parts.append(f"route={last_usage_info['llm_route']}")
+                debug_summary_parts.append(
+                    f"retry={last_usage_info.get('llm_retry_count', 0)}"
+                )
+            if last_usage_info.get("traffic_type") is not None:
+                debug_summary_parts.append(
+                    f"trafficType={last_usage_info['traffic_type']}"
+                )
+            if last_usage_info.get("thoughts_tokens"):
+                debug_summary_parts.append(
+                    f"thoughts={last_usage_info['thoughts_tokens']:,}"
+                )
+            if last_usage_info.get("cached_tokens"):
+                debug_summary_parts.append(
+                    f"cached={last_usage_info['cached_tokens']:,}"
+                )
+            st.caption("Last Usage: " + " | ".join(debug_summary_parts))
         for log in reversed(st.session_state["debug_logs"]):
             st.text(log)
 
@@ -193,7 +390,7 @@ def run_chatbot_app():
                 if "images" in msg and msg["images"]:
                     for img_b64 in msg["images"]:
                         try:
-                            st.image(base64.b64decode(img_b64), use_container_width=True)
+                            st.image(base64.b64decode(img_b64), width="stretch")
                         except Exception as e:
                             st.error(f"画像表示エラー: {e}")
 
@@ -213,6 +410,26 @@ def run_chatbot_app():
                     )
                     
                     # 生成中でない場合のみボタンを表示
+                    extra_usage_lines = []
+                    if u.get("llm_route"):
+                        extra_usage_lines.append(
+                            f"Route: {u['llm_route']} (retry={u.get('llm_retry_count', 0)})"
+                        )
+                    if u.get("traffic_type") is not None:
+                        extra_usage_lines.append(
+                            f"Traffic Type: {u['traffic_type']}"
+                        )
+                    if u.get("thoughts_tokens"):
+                        extra_usage_lines.append(
+                            f"Thoughts Tokens: {u['thoughts_tokens']:,}"
+                        )
+                    if u.get("cached_tokens"):
+                        extra_usage_lines.append(
+                            f"Cached Tokens: {u['cached_tokens']:,}"
+                        )
+                    if extra_usage_lines:
+                        st.caption("\n".join(extra_usage_lines))
+
                     if not st.session_state.get('is_generating', False):
                         if st.button("✂️ この会話から分岐", key=f"branch_btn_{i}", help="この回答までの履歴で新しいチャットを生成・保存します"):
                             handle_branching(i)
@@ -229,9 +446,9 @@ def run_chatbot_app():
             draft_text = st.text_area("編集して再送信", value=st.session_state['draft_input'], height=150)
             c1, c2 = st.columns([1, 4])
             with c1:
-                resend = st.form_submit_button("再送信", type="primary", use_container_width=True)
+                resend = st.form_submit_button("再送信", type="primary", width="stretch")
             with c2:
-                cancel_draft = st.form_submit_button("破棄 (入力をクリア)", use_container_width=True)
+                cancel_draft = st.form_submit_button("破棄 (入力をクリア)", width="stretch")
             
             if resend:
                 st.session_state['messages'].append({"role": "user", "content": draft_text})
@@ -298,7 +515,8 @@ def run_chatbot_app():
             full_response = ""
             full_thought_log = ""
             usage_metadata = None 
-            grounding_chunks = []
+            last_llm_route = None
+            last_llm_retry_count = 0
             
             is_special_mode = 'special_generation_messages' in st.session_state and st.session_state['special_generation_messages']
             
@@ -313,48 +531,50 @@ def run_chatbot_app():
             effort = st.session_state.get('reasoning_effort', 'high')
             is_report_mode = st.session_state.get('enable_report_pdf', False) and not is_special_mode
             is_deep_reasoning = (effort == 'deep') and not is_more_research and not is_report_mode and not is_special_mode
+            mode_name = _resolve_mode_name(
+                is_special_mode=is_special_mode,
+                is_more_research=is_more_research,
+                is_deep_reasoning=is_deep_reasoning,
+                is_report_mode=is_report_mode,
+            )
+            gcp_debug_start = len(st.session_state.get("debug_logs", []))
+            used_azure_fallback = False
+            azure_retry_system_instruction = ""
+            forced_mode_exception = None
+            if azure_supervisor_helpers.should_skip_gcp_for_mode(mode_name, fault_injection_cfg):
+                state_manager.add_debug_log(
+                    f"[Fault Injection] Forcing direct Azure branch for mode={mode_name}.",
+                    "warning",
+                )
+                forced_mode_exception = azure_fault_injection.build_synthetic_terminal_429(mode_name)
+            elif azure_fault_injection.should_inject_terminal_429(mode_name, fault_injection_cfg):
+                state_manager.add_debug_log(
+                    f"[Fault Injection] Injecting synthetic terminal 429 for mode={mode_name}.",
+                    "warning",
+                )
+                forced_mode_exception = azure_fault_injection.build_synthetic_terminal_429(mode_name)
 
-            chat_contents = []
-            system_instruction = ""
-            for m in target_messages:
-                if m["role"] == "system":
-                    system_instruction = m["content"]
-                else:
-                    chat_contents.append(types.Content(role=m["role"], parts=[types.Part.from_text(text=m["content"])]))
-            
-            file_attachments_meta = []
             queue_files = st.session_state.get('uploaded_file_queue', []) + st.session_state.get('clipboard_queue', [])
-            
-            available_files_map = {}
-            if st.session_state.get('auto_plot_enabled', False) and not is_special_mode:
-                for f in queue_files:
-                    try:
-                        f_path, f_name = dm.save_file(f)
-                        if f_path:
-                            available_files_map[f_name] = f_path
-                            state_manager.add_debug_log(f"Saved temp file for analysis: {f_name}")
-                    except Exception as e:
-                        state_manager.add_debug_log(f"Failed to save temp file {f.name}: {e}", "error")
-
-            if not is_special_mode and queue_files:
-                file_parts, file_meta = utils.process_uploaded_files_for_gemini(queue_files)
-                if file_parts and chat_contents:
-                    last_user_msg_content = chat_contents[-1]
-                    if last_user_msg_content.role == "user":
-                        last_user_msg_content.parts = file_parts + last_user_msg_content.parts
-                        file_attachments_meta = file_meta
-                        state_manager.add_debug_log(f"Attached {len(file_parts)} files to the request.")
-
-            if not is_special_mode:
-                context_parts = []
-                for i, code in enumerate(st.session_state['python_canvases']):
-                    is_enabled = st.session_state.get('canvas_enabled', [])[i] if i < len(st.session_state.get('canvas_enabled', [])) else True
-                    
-                    if is_enabled and code.strip() and code != config.ACE_EDITOR_DEFAULT_CODE:
-                        context_parts.append(types.Part.from_text(text=f"\n[Canvas-{i+1}]\n```python\n{code}\n```"))
-                
-                if context_parts and chat_contents:
-                    chat_contents[-1].parts = context_parts + chat_contents[-1].parts
+            canvas_enabled_flags = st.session_state.get('canvas_enabled', [])
+            (
+                chat_contents,
+                system_instruction,
+                available_files_map,
+                file_attachments_meta,
+                retry_context_snapshot,
+            ) = utils.build_materialized_chat_context(
+                target_messages=target_messages,
+                queue_files=queue_files,
+                python_canvases=st.session_state.get('python_canvases', []),
+                canvas_enabled_flags=canvas_enabled_flags,
+                is_special_mode=is_special_mode,
+                auto_plot_enabled=st.session_state.get('auto_plot_enabled', False),
+                data_manager_instance=dm,
+            )
+            if file_attachments_meta:
+                state_manager.add_debug_log(
+                    f"Attached {len(file_attachments_meta)} files to the request."
+                )
             
             if is_more_research or is_deep_reasoning:
                 t_level = types.ThinkingLevel.HIGH
@@ -374,6 +594,8 @@ def run_chatbot_app():
                 tools_config = [types.Tool(google_search=types.GoogleSearch())]
 
             try:
+                if forced_mode_exception is not None:
+                    raise forced_mode_exception
                 state_manager.add_debug_log(f"Requesting stream: {model_id} via {location} (max_output={max_tokens_val})")
                 
                 gen_config = types.GenerateContentConfig(
@@ -388,6 +610,7 @@ def run_chatbot_app():
                     )
 
                 final_grounding_metadata = None
+                mode_llm_meta = {}
 
                 if is_report_mode:
                     full_response, usage_metadata, _report_metadata = report_agent.run_report_generation(
@@ -401,9 +624,13 @@ def run_chatbot_app():
                         text_placeholder=text_placeholder,
                         thought_status=thought_status
                     )
+                    mode_llm_meta = {
+                        "llm_route": _report_metadata.get("llm_route"),
+                        "llm_retry_count": _report_metadata.get("llm_retry_count", 0),
+                    }
                     thought_area_container.empty()
                 elif is_more_research:
-                    full_response, usage_metadata, final_grounding_metadata = research_agent.run_deep_research(
+                    full_response, usage_metadata, final_grounding_metadata, mode_llm_meta = research_agent.run_deep_research(
                         client=client,
                         model_id=model_id,
                         gen_config=gen_config,
@@ -414,7 +641,7 @@ def run_chatbot_app():
                         thought_placeholder=thought_placeholder
                     )
                 elif is_deep_reasoning:
-                    full_response, usage_metadata, final_grounding_metadata = reasoning_agent.run_deep_reasoning(
+                    full_response, usage_metadata, final_grounding_metadata, mode_llm_meta = reasoning_agent.run_deep_reasoning(
                         client=client,
                         model_id=model_id,
                         gen_config=gen_config,
@@ -425,49 +652,44 @@ def run_chatbot_app():
                         thought_placeholder=thought_placeholder
                     )
                 else:
-                    stream = client.models.generate_content_stream(
-                        model=model_id,
+                    stream = llm_router.generate_content_stream_with_route(
+                        llm_clients=llm_clients,
+                        model_id=model_id,
                         contents=chat_contents,
-                        config=gen_config
+                        config=gen_config,
+                        mode="normal",
+                        logger=state_manager.add_debug_log,
                     )
 
                     for chunk in stream:
                         if chunk.usage_metadata:
                             usage_metadata = chunk.usage_metadata
-                        
-                        if not chunk.candidates: continue
-                        
-                        cand = chunk.candidates[0]
 
-                        if cand.grounding_metadata:
-                            grounding_chunks.append(cand.grounding_metadata)
-                            if cand.grounding_metadata.web_search_queries:
-                                queries = cand.grounding_metadata.web_search_queries
+                        if chunk.route:
+                            last_llm_route = chunk.route
+                        last_llm_retry_count = chunk.app_retry_count
+
+                        if chunk.grounding_metadata:
+                            final_grounding_metadata = llm_router.merge_grounding_metadata(
+                                final_grounding_metadata,
+                                chunk.grounding_metadata,
+                            )
+                            queries = chunk.grounding_metadata.get("queries", [])
+                            if queries:
                                 state_manager.add_debug_log(f"[Grounding] Queries detected: {queries}")
                                 for query in queries:
                                     action_text = f"\n\n🔍 **Action (Google Search):** `{query}`\n\n"
                                     full_thought_log += action_text
                                     thought_placeholder.markdown(full_thought_log)
 
-                        if cand.content and cand.content.parts:
-                            for part in cand.content.parts:
-                                is_thought = False
-                                thought_text = ""
-                                if hasattr(part, 'thought') and isinstance(part.thought, str) and part.thought:
-                                    is_thought = True
-                                    thought_text = part.thought
-                                elif hasattr(part, 'thought') and part.thought is True:
-                                    is_thought = True
-                                    thought_text = part.text
-
-                                if is_thought:
-                                    if thought_text:
-                                        full_thought_log += thought_text
-                                        thought_placeholder.markdown(full_thought_log)
-                                elif part.text:
-                                    full_response += part.text
-                                    text_placeholder.markdown(full_response + "▌")
-                    
+                        if chunk.thought_delta:
+                            full_thought_log += chunk.thought_delta
+                            thought_placeholder.markdown(full_thought_log)
+                        elif chunk.text_delta:
+                            full_response += chunk.text_delta
+                            text_placeholder.markdown(full_response + "▌")
+                        
+                        
                     text_placeholder.markdown(full_response)
                     
                     if not full_thought_log:
@@ -475,18 +697,51 @@ def run_chatbot_app():
                     else:
                         thought_status.update(label="思考完了 (Finished Thinking)", state="complete", expanded=False)
                     
-                    if grounding_chunks:
-                        last_meta = grounding_chunks[-1]
-                        final_grounding_metadata = {}
-                        if last_meta.grounding_chunks:
-                            sources = []
-                            for gc in last_meta.grounding_chunks:
-                                if gc.web:
-                                    sources.append({"title": gc.web.title, "uri": gc.web.uri})
-                            if sources:
-                                final_grounding_metadata["sources"] = sources
-                        if last_meta.web_search_queries:
-                            final_grounding_metadata["queries"] = last_meta.web_search_queries
+                fallback_logs = azure_supervisor_helpers.get_debug_logs_since(gcp_debug_start)
+                if (
+                    not full_response
+                    and azure_supervisor_helpers.should_attempt_azure_fallback(
+                        exception=None,
+                        log_lines=fallback_logs,
+                        visible_output_started=False,
+                        azure_runtime_available=azure_runtime.is_azure_runtime_available(azure_rt),
+                        mode_supported=True,
+                    )
+                ):
+                    state_manager.add_debug_log(
+                        f"[Azure Fallback] Activating Azure fallback for mode={mode_name} after GCP terminal 429.",
+                        "warning",
+                    )
+                    azure_result = _run_azure_mode(
+                        mode_name=mode_name,
+                        azure_rt=azure_rt,
+                        prompts=PROMPTS,
+                        target_messages=target_messages,
+                        queue_files=queue_files,
+                        python_canvases=st.session_state.get('python_canvases', []),
+                        canvas_enabled_flags=canvas_enabled_flags,
+                        is_special_mode=is_special_mode,
+                        auto_plot_enabled=st.session_state.get('auto_plot_enabled', False),
+                        data_manager_instance=dm,
+                        enable_search=enable_search or is_more_research,
+                        effort=effort,
+                        max_output_tokens=max_tokens_val,
+                        text_placeholder=text_placeholder,
+                        thought_status=thought_status,
+                        thought_placeholder=thought_placeholder,
+                    )
+                    used_azure_fallback = True
+                    full_response = azure_result.full_response
+                    full_thought_log = azure_result.thought_log
+                    azure_retry_system_instruction = azure_result.system_instruction
+                    usage_metadata = azure_result.usage_metadata
+                    final_grounding_metadata = azure_result.grounding_metadata
+                    mode_llm_meta = dict(azure_result.mode_meta)
+                    available_files_map = dict(azure_result.available_files_map)
+                    file_attachments_meta = list(azure_result.file_attachments_meta)
+                    retry_context_snapshot = list(azure_result.retry_context_snapshot)
+                    if mode_name == "report" or not full_thought_log:
+                        thought_area_container.empty()
 
                 if final_grounding_metadata and (final_grounding_metadata.get("sources") or final_grounding_metadata.get("queries")):
                     with st.expander("🔎 検索ソース (Grounding)"):
@@ -496,12 +751,26 @@ def run_chatbot_app():
 
                 current_usage = None
                 if usage_metadata:
+                    usage_summary = llm_router.summarize_usage_metadata(usage_metadata)
                     current_usage = {
-                        "total_tokens": usage_metadata.total_token_count,
-                        "input_tokens": usage_metadata.prompt_token_count,
-                        "output_tokens": usage_metadata.candidates_token_count
+                        "total_tokens": usage_summary["total_token_count"],
+                        "input_tokens": usage_summary["prompt_token_count"],
+                        "output_tokens": usage_summary["candidates_token_count"],
                     }
-                    st.session_state['total_usage']['total_tokens'] += usage_metadata.total_token_count
+                    if usage_summary.get("traffic_type") is not None:
+                        current_usage["traffic_type"] = usage_summary["traffic_type"]
+                    if usage_summary.get("thoughts_token_count"):
+                        current_usage["thoughts_tokens"] = usage_summary["thoughts_token_count"]
+                    if usage_summary.get("cached_content_token_count"):
+                        current_usage["cached_tokens"] = usage_summary["cached_content_token_count"]
+                    if last_llm_route:
+                        current_usage["llm_route"] = last_llm_route
+                        current_usage["llm_retry_count"] = last_llm_retry_count
+                    elif mode_llm_meta.get("llm_route"):
+                        current_usage["llm_route"] = mode_llm_meta.get("llm_route")
+                        current_usage["llm_retry_count"] = mode_llm_meta.get("llm_retry_count", 0)
+
+                    st.session_state['total_usage']['total_tokens'] += usage_summary["total_token_count"]
                     st.session_state['last_usage_info'] = current_usage
 
                 assistant_msg = {"role": "assistant", "content": full_response}
@@ -521,48 +790,240 @@ def run_chatbot_app():
                 else:
                     st.session_state['messages'].append(assistant_msg)
                     
-                    # 送信完了後、全てのCanvasを自動で無効(OFF)にする (常時ONモードがOFFの場合のみ)
                     if 'canvas_enabled' in st.session_state and not st.session_state.get('always_send_all_canvases', False):
-                        c_key = st.session_state.get('canvas_key_counter', 0)
                         for i in range(len(st.session_state['canvas_enabled'])):
                             st.session_state['canvas_enabled'][i] = False
-                            st.session_state[f"en_cvs_{i}_{c_key}"] = False
-                            if i == 0:
-                                st.session_state[f"en_cvs_s_{c_key}"] = False
                     
                     if st.session_state.get('auto_save_enabled', True):
                         current_file = st.session_state.get('current_chat_filename')
-                        new_filename = utils.save_auto_history(
-                            st.session_state['messages'],
-                            st.session_state['python_canvases'],
-                            st.session_state.get('multi_code_enabled', False),
-                            client,
-                            current_filename=current_file
+                        new_filename = _save_history_for_provider(
+                            used_azure_fallback=used_azure_fallback,
+                            azure_rt=azure_rt,
+                            messages=st.session_state['messages'],
+                            canvases=st.session_state['python_canvases'],
+                            multi_code_enabled=st.session_state.get('multi_code_enabled', False),
+                            client=client,
+                            current_filename=current_file,
                         )
                         if new_filename:
                             st.session_state['current_chat_filename'] = new_filename
 
-                # ファイルとクリップボードのクリア処理を完全に削除（ユーザーが手動で消すまで保持する）
-
-                # 実行エンジンの統合
                 auto_plot = st.session_state.get('auto_plot_enabled', False)
                 state_manager.add_debug_log(f"[DEBUG] Auto Plot Enabled: {auto_plot}, Special Mode: {is_special_mode}")
                 
                 if auto_plot and not is_special_mode and not is_report_mode:
-                    code_agent.run_auto_plot_agent(
-                        client=client,
-                        model_id=model_id,
-                        gen_config=gen_config,
-                        initial_response_text=full_response,
-                        available_files_map=available_files_map
+                    auto_plot_mode = "auto_plot_fix"
+                    auto_plot_debug_start = len(st.session_state.get("debug_logs", []))
+                    auto_plot_messages_before = len(st.session_state.get("messages", []))
+                    synthetic_auto_plot_exc = azure_supervisor_helpers.apply_fault_injection(
+                        auto_plot_mode,
+                        fault_injection_cfg,
                     )
+                    auto_plot_exception = None
+                    azure_auto_plot_context = None
+
+                    if used_azure_fallback or azure_supervisor_helpers.should_skip_gcp_for_mode(auto_plot_mode, fault_injection_cfg):
+                        if not used_azure_fallback:
+                            azure_auto_plot_context = azure_context_builder.build_materialized_context(
+                                target_messages=target_messages,
+                                queue_files=queue_files,
+                                python_canvases=st.session_state.get('python_canvases', []),
+                                canvas_enabled_flags=canvas_enabled_flags,
+                                is_special_mode=is_special_mode,
+                                auto_plot_enabled=st.session_state.get('auto_plot_enabled', False),
+                                data_manager_instance=dm,
+                            )
+                        if synthetic_auto_plot_exc is not None:
+                            state_manager.add_debug_log(
+                                "[Fault Injection] Forcing direct Azure auto-plot fallback.",
+                                "warning",
+                            )
+                        azure_code_agent.run_auto_plot_agent(
+                            runtime=azure_rt,
+                            initial_response_text=full_response,
+                            available_files_map=available_files_map,
+                            max_output_tokens=max_tokens_val,
+                            retry_context_snapshot=(
+                                retry_context_snapshot
+                                if used_azure_fallback
+                                else azure_auto_plot_context.clone_retry_context()
+                            ),
+                            system_instruction=(
+                                azure_retry_system_instruction
+                                if used_azure_fallback
+                                else azure_auto_plot_context.system_instruction
+                            ),
+                        )
+                    else:
+                        try:
+                            if synthetic_auto_plot_exc is not None:
+                                raise synthetic_auto_plot_exc
+                            code_agent.run_auto_plot_agent(
+                                client=client,
+                                model_id=model_id,
+                                gen_config=gen_config,
+                                initial_response_text=full_response,
+                                available_files_map=available_files_map,
+                                retry_context_snapshot=retry_context_snapshot,
+                            )
+                        except Exception as exc:
+                            auto_plot_exception = exc
+
+                        auto_plot_logs = azure_supervisor_helpers.get_debug_logs_since(auto_plot_debug_start)
+                        auto_plot_messages_after = len(st.session_state.get("messages", []))
+                        if (
+                            azure_runtime.is_azure_runtime_available(azure_rt)
+                            and (
+                                azure_supervisor_helpers.detect_terminal_429_from_exception(auto_plot_exception)
+                                or azure_supervisor_helpers.can_take_over_auto_plot_fix(
+                                    messages_before=auto_plot_messages_before,
+                                    messages_after=auto_plot_messages_after,
+                                    debug_logs_since_start=auto_plot_logs,
+                                )
+                            )
+                        ):
+                            state_manager.add_debug_log(
+                                "[Azure Fallback] Activating Azure auto-plot fallback.",
+                                "warning",
+                            )
+                            azure_auto_plot_context = azure_context_builder.build_materialized_context(
+                                target_messages=target_messages,
+                                queue_files=queue_files,
+                                python_canvases=st.session_state.get('python_canvases', []),
+                                canvas_enabled_flags=canvas_enabled_flags,
+                                is_special_mode=is_special_mode,
+                                auto_plot_enabled=st.session_state.get('auto_plot_enabled', False),
+                                data_manager_instance=dm,
+                            )
+                            azure_code_agent.run_auto_plot_agent(
+                                runtime=azure_rt,
+                                initial_response_text=full_response,
+                                available_files_map=available_files_map,
+                                max_output_tokens=max_tokens_val,
+                                retry_context_snapshot=azure_auto_plot_context.clone_retry_context(),
+                                system_instruction=azure_auto_plot_context.system_instruction,
+                            )
                 else:
                     if not auto_plot:
                          state_manager.add_debug_log("[DEBUG] Execution skipped because Auto Plot is OFF.")
 
             except Exception as e:
-                st.error(f"Error during generation: {e}")
-                state_manager.add_debug_log(str(e), "error")
+                fallback_logs = azure_supervisor_helpers.get_debug_logs_since(gcp_debug_start)
+                if azure_supervisor_helpers.should_attempt_azure_fallback(
+                    exception=e,
+                    log_lines=fallback_logs,
+                    visible_output_started=azure_supervisor_helpers.has_visible_output_started(
+                        full_response=full_response,
+                    ),
+                    azure_runtime_available=azure_runtime.is_azure_runtime_available(azure_rt),
+                    mode_supported=True,
+                ):
+                    state_manager.add_debug_log(
+                        f"[Azure Fallback] Activating Azure fallback for mode={mode_name} after exception.",
+                        "warning",
+                    )
+                    try:
+                        azure_result = _run_azure_mode(
+                            mode_name=mode_name,
+                            azure_rt=azure_rt,
+                            prompts=PROMPTS,
+                            target_messages=target_messages,
+                            queue_files=queue_files,
+                            python_canvases=st.session_state.get('python_canvases', []),
+                            canvas_enabled_flags=canvas_enabled_flags,
+                            is_special_mode=is_special_mode,
+                            auto_plot_enabled=st.session_state.get('auto_plot_enabled', False),
+                            data_manager_instance=dm,
+                            enable_search=enable_search or is_more_research,
+                            effort=effort,
+                            max_output_tokens=max_tokens_val,
+                            text_placeholder=text_placeholder,
+                            thought_status=thought_status,
+                            thought_placeholder=thought_placeholder,
+                        )
+                        used_azure_fallback = True
+                        full_response = azure_result.full_response
+                        full_thought_log = azure_result.thought_log
+                        azure_retry_system_instruction = azure_result.system_instruction
+                        usage_metadata = azure_result.usage_metadata
+                        final_grounding_metadata = azure_result.grounding_metadata
+                        mode_llm_meta = dict(azure_result.mode_meta)
+                        available_files_map = dict(azure_result.available_files_map)
+                        retry_context_snapshot = list(azure_result.retry_context_snapshot)
+
+                        if final_grounding_metadata and (final_grounding_metadata.get("sources") or final_grounding_metadata.get("queries")):
+                            with st.expander("🔎 検索ソース (Grounding)"):
+                                st.json(final_grounding_metadata)
+
+                        current_usage = None
+                        if usage_metadata:
+                            usage_summary = llm_router.summarize_usage_metadata(usage_metadata)
+                            current_usage = {
+                                "total_tokens": usage_summary["total_token_count"],
+                                "input_tokens": usage_summary["prompt_token_count"],
+                                "output_tokens": usage_summary["candidates_token_count"],
+                                "llm_route": mode_llm_meta.get("llm_route", "azure_fallback"),
+                                "llm_retry_count": mode_llm_meta.get("llm_retry_count", 0),
+                            }
+                            if usage_summary.get("traffic_type") is not None:
+                                current_usage["traffic_type"] = usage_summary["traffic_type"]
+                            if usage_summary.get("thoughts_token_count"):
+                                current_usage["thoughts_tokens"] = usage_summary["thoughts_token_count"]
+                            if usage_summary.get("cached_content_token_count"):
+                                current_usage["cached_tokens"] = usage_summary["cached_content_token_count"]
+                            st.session_state['total_usage']['total_tokens'] += usage_summary["total_token_count"]
+                            st.session_state['last_usage_info'] = current_usage
+
+                        assistant_msg = {"role": "assistant", "content": full_response}
+                        if current_usage:
+                            assistant_msg["usage"] = current_usage
+                        if final_grounding_metadata:
+                            assistant_msg["grounding_metadata"] = final_grounding_metadata
+                        if is_report_mode:
+                            assistant_msg["report_mode"] = True
+
+                        if is_special_mode:
+                            for m in target_messages:
+                                if m["role"] == "user":
+                                    st.session_state['messages'].append(m)
+                            st.session_state['messages'].append(assistant_msg)
+                            del st.session_state['special_generation_messages']
+                        else:
+                            st.session_state['messages'].append(assistant_msg)
+                            if 'canvas_enabled' in st.session_state and not st.session_state.get('always_send_all_canvases', False):
+                                for i in range(len(st.session_state['canvas_enabled'])):
+                                    st.session_state['canvas_enabled'][i] = False
+                            if st.session_state.get('auto_save_enabled', True):
+                                current_file = st.session_state.get('current_chat_filename')
+                                new_filename = _save_history_for_provider(
+                                    used_azure_fallback=True,
+                                    azure_rt=azure_rt,
+                                    messages=st.session_state['messages'],
+                                    canvases=st.session_state['python_canvases'],
+                                    multi_code_enabled=st.session_state.get('multi_code_enabled', False),
+                                    client=client,
+                                    current_filename=current_file,
+                                )
+                                if new_filename:
+                                    st.session_state['current_chat_filename'] = new_filename
+
+                        if st.session_state.get('auto_plot_enabled', False) and not is_special_mode and not is_report_mode:
+                            azure_code_agent.run_auto_plot_agent(
+                                runtime=azure_rt,
+                                initial_response_text=full_response,
+                                available_files_map=available_files_map,
+                                max_output_tokens=max_tokens_val,
+                                retry_context_snapshot=retry_context_snapshot,
+                                system_instruction=azure_retry_system_instruction,
+                            )
+                    except Exception as azure_exc:
+                        st.error(f"Error during generation: {e}")
+                        state_manager.add_debug_log(str(e), "error")
+                        st.error(f"Azure fallback failed: {azure_exc}")
+                        state_manager.add_debug_log(str(azure_exc), "error")
+                else:
+                    st.error(f"Error during generation: {e}")
+                    state_manager.add_debug_log(str(e), "error")
             finally:
                 st.session_state['is_generating'] = False
                 st.rerun()

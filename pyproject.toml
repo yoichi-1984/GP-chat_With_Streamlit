@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gp-chat"
-version = "0.3.1"
+version = "0.4.0"
 description = "GP-chat with Streamlit"
 authors = [
     { name = "yoichi-1984", email = "yoichi.1984.engineer@gmail.com" },
@@ -24,6 +24,7 @@ dependencies = [
     "pillow==11.1.0",
     "pandas==2.3.3",
     "matplotlib==3.10.8"
+    "openai==2.30.0"
 ]
 
 [project.scripts]

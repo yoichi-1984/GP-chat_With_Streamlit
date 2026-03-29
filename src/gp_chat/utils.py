@@ -1,4 +1,3 @@
-# utils.py:
 import os
 import sys
 import yaml
@@ -10,6 +9,7 @@ import hashlib
 import json
 import re
 import datetime
+import copy
 from importlib import resources
 import streamlit as st
 from google import genai
@@ -18,8 +18,12 @@ from google.genai import types
 # --- Import Logic for Package vs Script execution ---
 try:
     from . import config
+    from . import llm_router
+    from . import state_manager
 except ImportError:
     import config
+    import llm_router
+    import state_manager
 
 # python-docxのインポート（Wordファイル用）
 try:
@@ -291,11 +295,17 @@ def get_unique_filename(directory, base_filename):
     
     return unique_filename
 
-def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
+def generate_chat_title(messages, client_or_llm_clients, model_id=None):
     """
     会話履歴からチャット名を生成する。
     """
     try:
+        resolved_model_id = (
+            model_id
+            or st.session_state.get('current_model_id')
+            or os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.1-pro-preview")
+        )
+        llm_clients = llm_router.coerce_llm_clients(client_or_llm_clients)
         conversation_text = ""
         for m in messages:
             if m["role"] != "system":
@@ -312,23 +322,22 @@ def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
             max_output_tokens=1000,
             temperature=0.1
         )
-        if "gemini-3" in model_id:
+        if "gemini-3" in resolved_model_id:
              gen_config.thinking_config = types.ThinkingConfig(
                 thinking_level=types.ThinkingLevel.LOW,
                 include_thoughts=True
             )
 
-        response = client.models.generate_content(
-            model=model_id,
+        response = llm_router.generate_content_with_route(
+            llm_clients=llm_clients,
+            model_id=resolved_model_id,
             contents=prompt,
-            config=gen_config
+            config=gen_config,
+            mode="title_generation",
+            logger=state_manager.add_debug_log,
         )
         
-        title = ""
-        if response.candidates and response.candidates[0].content.parts:
-            for part in response.candidates[0].content.parts:
-                if part.text and (not hasattr(part, 'thought') or not part.thought):
-                    title += part.text
+        title = (response.text or "").strip()
         
         if not title:
             title = "無題のチャット"
@@ -339,7 +348,7 @@ def generate_chat_title(messages, client, model_id="gemini-3-flash-preview"):
         print(f"Title generation failed: {e}")
         return "自動保存チャット"
 
-def save_auto_history(messages, canvases, multi_code_enabled, client, current_filename=None):
+def save_auto_history(messages, canvases, multi_code_enabled, client_or_llm_clients, current_filename=None):
     """
     履歴を自動保存する。
     """
@@ -353,7 +362,11 @@ def save_auto_history(messages, canvases, multi_code_enabled, client, current_fi
 
     if not current_filename:
         date_prefix = datetime.datetime.now().strftime("%y%m%d")
-        chat_title = generate_chat_title(messages, client)
+        chat_title = generate_chat_title(
+            messages,
+            client_or_llm_clients,
+            model_id=st.session_state.get('current_model_id'),
+        )
         base_filename = f"{date_prefix}_{chat_title}.json"
         filename = get_unique_filename(log_dir, base_filename)
         current_filename = filename
@@ -417,3 +430,150 @@ def generate_branch_filename(current_filename, log_dir="chat_log"):
     branch_str = f"{next_branch:02d}"
     
     return f"{today_str}_{base_title}-{branch_str}.json"
+
+
+def _normalize_api_role(role):
+    """Map UI/session roles to Gemini API conversation roles."""
+    if role in ("assistant", "model"):
+        return "model"
+    return "user"
+
+
+def _clone_content_for_retry(content):
+    """Clone a Gemini content object as deeply as the SDK supports."""
+    if hasattr(content, "model_copy"):
+        return content.model_copy(deep=True)
+    return copy.deepcopy(content)
+
+
+def build_materialized_chat_context(
+    target_messages,
+    queue_files,
+    python_canvases,
+    canvas_enabled_flags,
+    is_special_mode,
+    auto_plot_enabled,
+    data_manager_instance,
+):
+    """
+    Build the fully materialized request context used for the first LLM call.
+
+    Returns:
+        tuple:
+            - chat_contents
+            - system_instruction
+            - available_files_map
+            - file_attachments_meta
+            - retry_context_snapshot
+    """
+    chat_contents = []
+    system_instruction = ""
+
+    for message in target_messages:
+        role = message.get("role", "user")
+        if role == "system":
+            system_instruction = message.get("content", "")
+            continue
+
+        chat_contents.append(
+            types.Content(
+                role=_normalize_api_role(role),
+                parts=[types.Part.from_text(text=message.get("content", ""))],
+            )
+        )
+
+    available_files_map = {}
+    file_attachments_meta = []
+
+    if auto_plot_enabled and not is_special_mode and data_manager_instance:
+        for queued_file in queue_files:
+            try:
+                file_path, file_name = data_manager_instance.save_file(queued_file)
+                if file_path:
+                    available_files_map[file_name] = file_path
+            except Exception as e:
+                file_label = getattr(queued_file, "name", "unknown_file")
+                state_manager.add_debug_log(
+                    f"[Context Builder] Failed to save temp file {file_label}: {e}",
+                    "error",
+                )
+
+    target_user_content = None
+    for content in reversed(chat_contents):
+        if getattr(content, "role", None) == "user":
+            target_user_content = content
+            break
+
+    if target_user_content is None and not is_special_mode and (
+        queue_files or python_canvases
+    ):
+        state_manager.add_debug_log(
+            "[Context Builder] No user message found for attachment/canvas injection.",
+            "warning",
+        )
+
+    if not is_special_mode and queue_files and target_user_content is not None:
+        file_parts, file_meta = process_uploaded_files_for_gemini(queue_files)
+        if file_parts:
+            target_user_content.parts = list(file_parts) + list(
+                target_user_content.parts or []
+            )
+            file_attachments_meta = file_meta
+            state_manager.add_debug_log(
+                (
+                    "[Context Builder] Injected "
+                    f"{len(file_parts)} attachment parts from {len(file_meta)} files."
+                )
+            )
+
+    injected_canvas_count = 0
+    if not is_special_mode and target_user_content is not None:
+        context_parts = []
+        for index, code in enumerate(python_canvases):
+            is_enabled = (
+                canvas_enabled_flags[index]
+                if index < len(canvas_enabled_flags)
+                else True
+            )
+            if is_enabled and code.strip() and code != config.ACE_EDITOR_DEFAULT_CODE:
+                context_parts.append(
+                    types.Part.from_text(
+                        text=f"\n[Canvas-{index + 1}]\n```python\n{code}\n```"
+                    )
+                )
+                injected_canvas_count += 1
+
+        if context_parts:
+            target_user_content.parts = context_parts + list(
+                target_user_content.parts or []
+            )
+            state_manager.add_debug_log(
+                f"[Context Builder] Injected {injected_canvas_count} canvas snippets."
+            )
+
+    try:
+        retry_context_snapshot = [
+            _clone_content_for_retry(content) for content in chat_contents
+        ]
+        state_manager.add_debug_log(
+            "[Context Builder] Created retry snapshot via deep copy."
+        )
+    except Exception as e:
+        # Fallback must preserve the already-materialized multimodal context.
+        # Do not rebuild from target_messages here, or attachment/canvas context is lost.
+        retry_context_snapshot = list(chat_contents)
+        state_manager.add_debug_log(
+            (
+                "[Context Builder] Deep copy failed; using shallow snapshot of "
+                f"materialized context: {e}"
+            ),
+            "warning",
+        )
+
+    return (
+        chat_contents,
+        system_instruction,
+        available_files_map,
+        file_attachments_meta,
+        retry_context_snapshot,
+    )

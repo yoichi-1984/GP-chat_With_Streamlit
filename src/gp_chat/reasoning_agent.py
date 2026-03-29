@@ -1,4 +1,3 @@
-# reasoning_agent.py:
 import json
 import time
 import streamlit as st
@@ -7,8 +6,10 @@ from google.genai import types
 # --- Local Module Imports ---
 try:
     from gp_chat import state_manager
+    from gp_chat import llm_router
 except ImportError:
     import state_manager
+    import llm_router
 
 def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instruction, 
                        text_placeholder, thought_status, thought_placeholder):
@@ -25,29 +26,34 @@ def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instr
     """
     state_manager.add_debug_log("[Deep Reasoning] Starting hybrid reasoning agent...")
     
+    llm_clients = llm_router.coerce_llm_clients(client)
     total_usage = {"input": 0, "output": 0, "total": 0}
     combined_grounding = {"sources": [], "queries": []}
+    last_llm_route = None
+    last_llm_retry_count = 0
     full_thought_log = "### 🧠 Deep Reasoning Process\n\n"
     
-    # Reasoningモードのベース設定 (Web検索がONの場合は gen_config.tools に引き継がれている)
-    base_config = types.GenerateContentConfig(
-        max_output_tokens=gen_config.max_output_tokens,
-        temperature=gen_config.temperature,
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=True),
-        tools=gen_config.tools # Web検索ツールを適用
-    )
 
-    def extract_grounding_info(candidate):
-        """レスポンスからGrounding情報を抽出してcombined_groundingに追加するヘルパー"""
-        if candidate and candidate.grounding_metadata:
-            g_meta = candidate.grounding_metadata
-            if g_meta.web_search_queries:
-                combined_grounding["queries"].extend(g_meta.web_search_queries)
-            if g_meta.grounding_chunks:
-                for chunk in g_meta.grounding_chunks:
-                    if chunk.web:
-                        if not any(s['uri'] == chunk.web.uri for s in combined_grounding["sources"]):
-                            combined_grounding["sources"].append({"title": chunk.web.title, "uri": chunk.web.uri})
+    def add_usage(usage_metadata):
+        if not usage_metadata:
+            return
+        total_usage["input"] += (usage_metadata.prompt_token_count or 0)
+        total_usage["output"] += (usage_metadata.candidates_token_count or 0)
+
+    def add_grounding(grounding_metadata):
+        nonlocal combined_grounding
+        merged = llm_router.merge_grounding_metadata(combined_grounding, grounding_metadata)
+        if merged:
+            combined_grounding = {
+                "sources": list(merged.get("sources", [])),
+                "queries": list(merged.get("queries", [])),
+            }
+
+    def capture_route(route, retry_count):
+        nonlocal last_llm_route, last_llm_retry_count
+        if route:
+            last_llm_route = route
+        last_llm_retry_count = retry_count or 0
 
     # ---------------------------------------------------------
     # Phase 1: Brainstorming (多角的なアプローチの立案)
@@ -92,18 +98,18 @@ def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instr
     
     approaches = []
     try:
-        bs_response = client.models.generate_content(
-            model=model_id,
+        bs_response = llm_router.generate_content_with_route(
+            llm_clients=llm_clients,
+            model_id=model_id,
             contents=brainstorm_contents,
-            config=brainstorm_config
+            config=brainstorm_config,
+            mode="reasoning",
+            logger=state_manager.add_debug_log,
         )
         
-        if bs_response.usage_metadata:
-            total_usage["input"] += (bs_response.usage_metadata.prompt_token_count or 0)
-            total_usage["output"] += (bs_response.usage_metadata.candidates_token_count or 0)
-            
-        if bs_response.candidates:
-            extract_grounding_info(bs_response.candidates[0])
+        add_usage(bs_response.usage_metadata)
+        add_grounding(bs_response.grounding_metadata)
+        capture_route(bs_response.route, bs_response.app_retry_count)
             
         bs_data = json.loads(bs_response.text)
         approaches = bs_data.get("approaches", [])[:3] # 最大3つ
@@ -147,18 +153,18 @@ def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instr
         )
         
         try:
-            cr_response = client.models.generate_content(
-                model=model_id,
+            cr_response = llm_router.generate_content_with_route(
+                llm_clients=llm_clients,
+                model_id=model_id,
                 contents=chat_contents + [types.Content(role="user", parts=[types.Part.from_text(text=critique_prompt)])],
-                config=critique_config
+                config=critique_config,
+                mode="reasoning",
+                logger=state_manager.add_debug_log,
             )
             
-            if cr_response.usage_metadata:
-                total_usage["input"] += (cr_response.usage_metadata.prompt_token_count or 0)
-                total_usage["output"] += (cr_response.usage_metadata.candidates_token_count or 0)
-
-            if cr_response.candidates:
-                extract_grounding_info(cr_response.candidates[0])
+            add_usage(cr_response.usage_metadata)
+            add_grounding(cr_response.grounding_metadata)
+            capture_route(cr_response.route, cr_response.app_retry_count)
 
             result_text = cr_response.text
             critique_results.append(f"【アプローチ: {app['name']} の検証と自己批判】\n{result_text}")
@@ -210,51 +216,40 @@ def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instr
     
     try:
         # ストリーミング生成
-        stream = client.models.generate_content_stream(
-            model=model_id,
+        stream = llm_router.generate_content_stream_with_route(
+            llm_clients=llm_clients,
+            model_id=model_id,
             contents=chat_contents,
-            config=synth_config
+            config=synth_config,
+            mode="reasoning",
+            logger=state_manager.add_debug_log,
         )
         
         for chunk in stream:
             if chunk.usage_metadata:
                 synth_usage = chunk.usage_metadata
 
-            if not chunk.candidates: continue
-            cand = chunk.candidates[0]
-            
-            # Synthesis時のGrounding情報も追加
-            extract_grounding_info(cand)
+            if hasattr(chunk, "route"):
+                capture_route(chunk.route, chunk.app_retry_count)
+                if chunk.grounding_metadata:
+                    add_grounding(chunk.grounding_metadata)
 
-            if cand.content and cand.content.parts:
-                for part in cand.content.parts:
-                    # Thought部分はUIに流す
-                    is_thought = False
-                    thought_text = ""
-                    if hasattr(part, 'thought') and isinstance(part.thought, str) and part.thought:
-                        is_thought = True
-                        thought_text = part.thought
-                    elif hasattr(part, 'thought') and part.thought is True:
-                        is_thought = True
-                        thought_text = part.text
+                if chunk.thought_delta:
+                    full_thought_log += chunk.thought_delta
+                    thought_placeholder.markdown(full_thought_log)
+                elif chunk.text_delta:
+                    full_response += chunk.text_delta
+                    text_placeholder.markdown(full_response + "▌")
+                continue
 
-                    if is_thought and thought_text:
-                        full_thought_log += thought_text
-                        thought_placeholder.markdown(full_thought_log)
-                    elif part.text:
-                        full_response += part.text
-                        text_placeholder.markdown(full_response + "▌")
-                        
         text_placeholder.markdown(full_response)
         
-        if synth_usage:
-            total_usage["input"] += (synth_usage.prompt_token_count or 0)
-            total_usage["output"] += (synth_usage.candidates_token_count or 0)
+        add_usage(synth_usage)
         
     except Exception as e:
         state_manager.add_debug_log(f"[Deep Reasoning] Synthesis failed: {e}", "error")
         st.error(f"Synthesis failed: {e}")
-        return "", None, None
+        return "", None, None, {}
 
     # 完了ステータス
     thought_status.update(label="推論特化処理完了 (Deep Reasoning Finished)", state="complete", expanded=False)
@@ -270,4 +265,7 @@ def run_deep_reasoning(client, model_id, gen_config, chat_contents, system_instr
     # Queriesの重複排除
     combined_grounding["queries"] = list(set(combined_grounding["queries"]))
 
-    return full_response, final_usage_metadata, combined_grounding
+    return full_response, final_usage_metadata, combined_grounding, {
+        "llm_route": last_llm_route,
+        "llm_retry_count": last_llm_retry_count,
+    }

@@ -1,4 +1,3 @@
-# data_manager.py:
 import os
 import shutil
 import uuid
@@ -90,4 +89,3 @@ class SessionDataManager:
                 shutil.rmtree(self.base_dir)
             except Exception as e:
                 print(f"Error cleaning up session dir: {e}")
-                

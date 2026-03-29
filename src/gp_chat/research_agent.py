@@ -6,11 +6,13 @@ from google.genai import types
 # --- Local Module Imports ---
 try:
     from gp_chat import state_manager
+    from gp_chat import llm_router
 except ImportError:
     import state_manager
+    import llm_router
 
 def run_deep_research(client, model_id, gen_config, chat_contents, system_instruction, 
-                      text_placeholder, thought_status, thought_placeholder):
+                       text_placeholder, thought_status, thought_placeholder):
     """
     徹底調査モード (More Research) 用のエージェント。
     1. Dynamic Research: 情報の過不足を評価しながら、動的な検索ループ(ReAct)を実行
@@ -21,10 +23,34 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
     """
     state_manager.add_debug_log("[Deep Research] Starting dynamic ReAct agent...")
     
+    llm_clients = llm_router.coerce_llm_clients(client)
     total_usage = {"input": 0, "output": 0, "total": 0}
     combined_grounding = {"sources": [], "queries": []}
+    last_llm_route = None
+    last_llm_retry_count = 0
     full_thought_log = "### 🧠 Deep Research Process\n\n"
     
+    def add_usage(usage_metadata):
+        if not usage_metadata:
+            return
+        total_usage["input"] += (usage_metadata.prompt_token_count or 0)
+        total_usage["output"] += (usage_metadata.candidates_token_count or 0)
+
+    def add_grounding(grounding_metadata):
+        nonlocal combined_grounding
+        merged = llm_router.merge_grounding_metadata(combined_grounding, grounding_metadata)
+        if merged:
+            combined_grounding = {
+                "sources": list(merged.get("sources", [])),
+                "queries": list(merged.get("queries", [])),
+            }
+
+    def capture_route(route, retry_count):
+        nonlocal last_llm_route, last_llm_retry_count
+        if route:
+            last_llm_route = route
+        last_llm_retry_count = retry_count or 0
+
     # ---------------------------------------------------------
     # Phase 1: Dynamic Research Loop (ReAct型深掘り)
     # ---------------------------------------------------------
@@ -82,14 +108,16 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
         react_contents = react_contents + [types.Content(role="user", parts=[types.Part.from_text(text=react_prompt)])]
         
         try:
-            react_response = client.models.generate_content(
-                model=model_id,
+            react_response = llm_router.generate_content_with_route(
+                llm_clients=llm_clients,
+                model_id=model_id,
                 contents=react_contents,
-                config=react_config
+                config=react_config,
+                mode="research",
+                logger=state_manager.add_debug_log,
             )
-            if react_response.usage_metadata:
-                total_usage["input"] += (react_response.usage_metadata.prompt_token_count or 0)
-                total_usage["output"] += (react_response.usage_metadata.candidates_token_count or 0)
+            add_usage(react_response.usage_metadata)
+            capture_route(react_response.route, react_response.app_retry_count)
                 
             # --- JSONパースの堅牢化 (クラッシュ防止対策) ---
             raw_text = react_response.text
@@ -151,26 +179,21 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
                 thought_placeholder.markdown(full_thought_log)
                 
                 exec_prompt = f"以下のクエリでGoogle検索を行い、判明した重要な事実、データ、見解を詳細に要約してリストアップしてください。\nクエリ: {query}"
-                exec_response = client.models.generate_content(
-                    model=model_id,
+                exec_response = llm_router.generate_content_with_route(
+                    llm_clients=llm_clients,
+                    model_id=model_id,
                     contents=[types.Content(role="user", parts=[types.Part.from_text(text=exec_prompt)])],
-                    config=exec_config
+                    config=exec_config,
+                    mode="research",
+                    logger=state_manager.add_debug_log,
                 )
                 
-                if exec_response.usage_metadata:
-                    total_usage["input"] += (exec_response.usage_metadata.prompt_token_count or 0)
-                    total_usage["output"] += (exec_response.usage_metadata.candidates_token_count or 0)
+                add_usage(exec_response.usage_metadata)
+                capture_route(exec_response.route, exec_response.app_retry_count)
                 
                 # Grounding情報の収集
-                if exec_response.candidates and exec_response.candidates[0].grounding_metadata:
-                    g_meta = exec_response.candidates[0].grounding_metadata
-                    if g_meta.web_search_queries:
-                        combined_grounding["queries"].extend(g_meta.web_search_queries)
-                    if g_meta.grounding_chunks:
-                        for chunk in g_meta.grounding_chunks:
-                            if chunk.web:
-                                if not any(s['uri'] == chunk.web.uri for s in combined_grounding["sources"]):
-                                    combined_grounding["sources"].append({"title": chunk.web.title, "uri": chunk.web.uri})
+                if hasattr(exec_response, "grounding_metadata"):
+                    add_grounding(exec_response.grounding_metadata)
 
                 result_text = exec_response.text
                 research_results.append(f"【検索クエリ: {query} の調査結果】\n{result_text}")
@@ -223,58 +246,40 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
     
     try:
         # ストリーミング生成
-        stream = client.models.generate_content_stream(
-            model=model_id,
+        stream = llm_router.generate_content_stream_with_route(
+            llm_clients=llm_clients,
+            model_id=model_id,
             contents=chat_contents,
-            config=synth_config
+            config=synth_config,
+            mode="research",
+            logger=state_manager.add_debug_log,
         )
         
         for chunk in stream:
             if chunk.usage_metadata:
                 synth_usage = chunk.usage_metadata
 
-            if not chunk.candidates: continue
-            cand = chunk.candidates[0]
-            
-            # Synthesis時のGrounding情報も追加
-            if cand.grounding_metadata:
-                g_meta = cand.grounding_metadata
-                if g_meta.web_search_queries:
-                    combined_grounding["queries"].extend(g_meta.web_search_queries)
-                if g_meta.grounding_chunks:
-                    for g_chunk in g_meta.grounding_chunks:
-                        if g_chunk.web and not any(s['uri'] == g_chunk.web.uri for s in combined_grounding["sources"]):
-                            combined_grounding["sources"].append({"title": g_chunk.web.title, "uri": g_chunk.web.uri})
+            if hasattr(chunk, "route"):
+                capture_route(chunk.route, chunk.app_retry_count)
+                if chunk.grounding_metadata:
+                    add_grounding(chunk.grounding_metadata)
 
-            if cand.content and cand.content.parts:
-                for part in cand.content.parts:
-                    # Thought部分はUIに流す
-                    is_thought = False
-                    thought_text = ""
-                    if hasattr(part, 'thought') and isinstance(part.thought, str) and part.thought:
-                        is_thought = True
-                        thought_text = part.thought
-                    elif hasattr(part, 'thought') and part.thought is True:
-                        is_thought = True
-                        thought_text = part.text
+                if chunk.thought_delta:
+                    full_thought_log += chunk.thought_delta
+                    thought_placeholder.markdown(full_thought_log)
+                elif chunk.text_delta:
+                    full_response += chunk.text_delta
+                    text_placeholder.markdown(full_response + "▌")
+                continue
 
-                    if is_thought and thought_text:
-                        full_thought_log += thought_text
-                        thought_placeholder.markdown(full_thought_log)
-                    elif part.text:
-                        full_response += part.text
-                        text_placeholder.markdown(full_response + "▌")
-                        
         text_placeholder.markdown(full_response)
         
-        if synth_usage:
-            total_usage["input"] += (synth_usage.prompt_token_count or 0)
-            total_usage["output"] += (synth_usage.candidates_token_count or 0)
+        add_usage(synth_usage)
         
     except Exception as e:
         state_manager.add_debug_log(f"[Deep Research] Synthesis failed: {e}", "error")
         st.error(f"Synthesis failed: {e}")
-        return "", None, None
+        return "", None, None, {}
 
     # 完了ステータス
     thought_status.update(label="徹底調査完了 (Deep Research Finished)", state="complete", expanded=False)
@@ -290,4 +295,7 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
     # Queriesの重複排除
     combined_grounding["queries"] = list(set(combined_grounding["queries"]))
 
-    return full_response, final_usage_metadata, combined_grounding
+    return full_response, final_usage_metadata, combined_grounding, {
+        "llm_route": last_llm_route,
+        "llm_retry_count": last_llm_retry_count,
+    }

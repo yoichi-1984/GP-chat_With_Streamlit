@@ -84,4 +84,4 @@ file_uploader:
   - '.kt'
   - '.kts'
   - '.ipynb'
-  - 'zip' 
+  - 'zip'

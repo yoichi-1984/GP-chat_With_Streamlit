@@ -1,27 +1,32 @@
+from __future__ import annotations
+
 import os
 import re
 import subprocess
 from pathlib import Path
-import streamlit as st
-from google.genai import types
 
-# --- Local Module Imports ---
+import streamlit as st
+
 try:
     from gp_chat import state_manager
-    from gp_chat import utils
-    from gp_chat import llm_router
 except ImportError:
     import state_manager
-    import utils
-    import llm_router
+
+from . import azure_history_utils
+from . import azure_responses_router
+from .azure_runtime import AzureRuntime
+
 
 DEFAULT_REPORT_PROMPT = """
-# 指令
-これまでの議論の全容を総括し、プレゼンテーションや報告書としてそのまま使用できる「HTMLベースのインフォグラフィックス（スライド資料）」を作成してください。
-# 出力形式
-* 1つのファイルで完結するHTMLコード（CSSは<style>タグ内に記述）として出力してください。
-* 説明文やコードフェンスは不要です。HTMLコードのみを返してください。
+# Task
+Create a complete single-file HTML slide deck from the conversation so far.
+
+# Output requirements
+* Return exactly one complete HTML document.
+* Include all CSS inline in a <style> block.
+* Do not wrap the answer in markdown fences.
 """.strip()
+
 
 PDF_BROWSER_CANDIDATES = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -30,10 +35,10 @@ PDF_BROWSER_CANDIDATES = [
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
 ]
 
+
 def _extract_html_document(raw_text):
     cleaned = (raw_text or "").strip()
     fenced_match = re.search(r"```(?:html)?\s*(.*?)```", cleaned, flags=re.IGNORECASE | re.DOTALL)
-
     if fenced_match:
         cleaned = fenced_match.group(1).strip()
 
@@ -47,10 +52,12 @@ def _extract_html_document(raw_text):
         return cleaned[html_pos:].strip()
     return cleaned
 
+
 def _resolve_report_folder_name(messages, client, model_id):
     current_report_folder = st.session_state.get("current_report_folder")
     if current_report_folder:
         return current_report_folder
+
     current_chat_filename = st.session_state.get("current_chat_filename")
     if current_chat_filename:
         folder_name = os.path.splitext(os.path.basename(current_chat_filename))[0]
@@ -62,6 +69,7 @@ def _resolve_report_folder_name(messages, client, model_id):
     st.session_state["current_report_folder"] = folder_name
     return folder_name
 
+
 def _next_report_number(report_dir):
     existing_numbers = []
     if os.path.isdir(report_dir):
@@ -71,11 +79,13 @@ def _next_report_number(report_dir):
                 existing_numbers.append(int(stem))
     return max(existing_numbers, default=0) + 1
 
+
 def _find_pdf_browser():
     for browser_path in PDF_BROWSER_CANDIDATES:
         if os.path.exists(browser_path):
             return browser_path
     return None
+
 
 def _render_html_to_pdf(html_path, pdf_path):
     browser_path = _find_pdf_browser()
@@ -104,13 +114,16 @@ def _render_html_to_pdf(html_path, pdf_path):
         timeout=60,
         check=False,
     )
+
     if result.returncode != 0:
         error_text = (result.stderr or result.stdout or "").strip()
         return False, error_text or "ブラウザの PDF 出力に失敗しました。"
 
     if not os.path.exists(abs_pdf_path):
         return False, "PDF ファイルが出力されませんでした。"
+
     return True, None
+
 
 def run_report_generation(
     client,

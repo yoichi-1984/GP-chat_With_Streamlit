@@ -168,4 +168,4 @@ def recover_interrupted_session():
         
         add_debug_log("Detected interrupted session. Restored draft text.")
         return True
-    return False    
+    return False
