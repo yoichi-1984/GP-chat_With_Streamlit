@@ -23,7 +23,7 @@ dependencies = [
     "pywin32==311",
     "pillow==11.1.0",
     "pandas==2.3.3",
-    "matplotlib==3.10.8"
+    "matplotlib==3.10.8",
     "openai==2.30.0"
 ]
 
