@@ -37,7 +37,7 @@ class SyntheticTerminal429Error(RuntimeError):
             "error": {
                 "code": 429,
                 "message": (
-                    "Synthetic terminal 429 injected for mode '{mode}'. "
+                    f"Synthetic terminal 429 injected for mode '{mode}'. "
                     "This simulates a generic upstream rate-limit failure."
                 ),
                 "status": "RESOURCE_EXHAUSTED",

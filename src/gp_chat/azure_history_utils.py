@@ -69,7 +69,7 @@ def generate_chat_title(messages, runtime: AzureRuntime) -> str:
         prompt = (
             "Create a concise Japanese chat title in 15 to 20 Japanese characters. "
             "Return only the title text, no quotes, no markdown.\n\n"
-            "Conversation:\n{conversation_text}"
+            f"Conversation:\n{conversation_text}"
         )
         result = azure_responses_router.generate_response(
             runtime=runtime,
