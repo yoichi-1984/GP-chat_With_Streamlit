@@ -1,0 +1,26 @@
+[global]
+enabled = true
+
+[modes.normal]
+inject_terminal_429 = false
+force_azure_branch = false
+
+[modes.special]
+inject_terminal_429 = false
+force_azure_branch = false
+
+[modes.research]
+inject_terminal_429 = false
+force_azure_branch = false
+
+[modes.reasoning]
+inject_terminal_429 = false
+force_azure_branch = false
+
+[modes.report]
+inject_terminal_429 = false
+force_azure_branch = false
+
+[modes.auto_plot_fix]
+inject_terminal_429 = false
+force_azure_branch = false
