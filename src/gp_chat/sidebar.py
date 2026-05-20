@@ -185,6 +185,10 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             else:
                 st.session_state["file_uploader_key"] = 1
             
+            # --- Canvasの内容も初期化 ---
+            st.session_state['python_canvases'] = [config.ACE_EDITOR_DEFAULT_CODE]
+            # --------------------------
+            
             if 'clipboard_queue' in st.session_state:
                 st.session_state['clipboard_queue'] = []
             

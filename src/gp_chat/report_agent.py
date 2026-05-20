@@ -95,15 +95,21 @@ def _render_html_to_pdf(html_path, pdf_path):
         html_uri,
     ]
 
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",    # 追加: 出力をUTF-8として明示的に読み込む
-        errors="replace",    # 追加: デコードできない文字は「?」等に置換してクラッシュを防ぐ
-        timeout=60,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",    # 追加: 出力をUTF-8として明示的に読み込む
+            errors="replace",    # 追加: デコードできない文字は「?」等に置換してクラッシュを防ぐ
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "PDF 生成がタイムアウトしました (60秒)。"
+    except Exception as e:
+        return False, f"ブラウザの起動中にエラーが発生しました: {e}"
+
     if result.returncode != 0:
         error_text = (result.stderr or result.stdout or "").strip()
         return False, error_text or "ブラウザの PDF 出力に失敗しました。"

@@ -109,6 +109,10 @@ def _convert_ppt_to_images_core(file_bytes, filename):
                 except Exception:
                     pass
             ppt_app = None
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
         
         image_data_list = []
         search_path = os.path.join(output_dir, "*.PNG")
@@ -303,7 +307,7 @@ def generate_chat_title(messages, client_or_llm_clients, model_id=None):
         resolved_model_id = (
             model_id
             or st.session_state.get('current_model_id')
-            or os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.1-pro-preview")
+            or os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.5-flash")
         )
         llm_clients = llm_router.coerce_llm_clients(client_or_llm_clients)
         conversation_text = ""

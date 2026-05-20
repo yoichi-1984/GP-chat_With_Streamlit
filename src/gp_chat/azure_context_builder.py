@@ -96,6 +96,10 @@ def _convert_ppt_to_images_core(file_bytes: bytes, filename: str) -> list[tuple[
                 except Exception:
                     pass
             ppt_app = None
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
 
         image_data_list: list[tuple[bytes, str]] = []
         slide_files = glob.glob(os.path.join(output_dir, "*.PNG"))

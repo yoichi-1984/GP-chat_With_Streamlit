@@ -3,6 +3,7 @@ import sys
 import base64
 import json
 import datetime
+from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -31,6 +32,7 @@ try:
     from gp_chat import azure_code_agent
     from gp_chat import azure_history_utils
     from gp_chat import azure_supervisor_helpers
+    from gp_chat import cloud_logging_utils
     from gp_chat.azure_common_types import AzureModeResult
 except ImportError:
     import config
@@ -53,6 +55,7 @@ except ImportError:
     import azure_code_agent
     import azure_history_utils
     import azure_supervisor_helpers
+    import cloud_logging_utils
     from azure_common_types import AzureModeResult
 
 
@@ -192,6 +195,84 @@ def _save_history_for_provider(
         current_filename=current_filename,
     )
 
+
+def _is_valid_user_email(candidate):
+    if not isinstance(candidate, str):
+        return False
+    email = candidate.strip()
+    if not email:
+        return False
+    if any(char.isspace() for char in email):
+        return False
+    if email.count("@") != 1:
+        return False
+
+    local_part, domain_part = email.split("@", 1)
+    return bool(local_part and domain_part)
+
+
+def _ensure_user_email_from_mail_txt():
+    mail_path = Path.cwd() / "mail.txt"
+
+    session_email = st.session_state.get("user_email")
+    if _is_valid_user_email(session_email):
+        st.session_state["user_email"] = session_email.strip()
+        return
+
+    read_error = None
+    if mail_path.exists():
+        try:
+            mail_text = mail_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            read_error = exc
+        else:
+            if _is_valid_user_email(mail_text):
+                st.session_state["user_email"] = mail_text
+                return
+            if mail_text:
+                st.warning("mail.txt のメールアドレス形式が不正です。正しいメールアドレスを入力してください。")
+            else:
+                st.warning("mail.txt が空です。メールアドレスを入力してください。")
+
+    if read_error is not None:
+        st.warning(f"mail.txt を読み取れませんでした: {read_error}")
+
+    st.subheader("メールアドレスの設定")
+    st.caption(f"Cloud Logging の user_email として使用します。保存先: {mail_path}")
+    with st.form("user_email_form"):
+        email_input = st.text_input("メールアドレス", placeholder="user@example")
+        submitted = st.form_submit_button("保存して続行", type="primary")
+
+    if submitted:
+        email = email_input.strip()
+        if not _is_valid_user_email(email):
+            st.error("メールアドレスの形式が正しくありません。空白を含めず、@ の前後を入力してください。")
+            st.stop()
+        try:
+            mail_path.write_text(email + "\n", encoding="utf-8")
+        except OSError as exc:
+            st.error(f"mail.txt の保存に失敗しました: {exc}")
+            st.stop()
+
+        st.session_state["user_email"] = email
+        st.rerun()
+
+    st.stop()
+
+
+def _send_ai_usage_log(current_usage, model_id, project_id, location):
+    if not current_usage:
+        return
+    cloud_logging_utils.write_ai_usage_log(
+        current_usage=current_usage,
+        user_email=st.session_state.get("user_email", ""),
+        model_name=model_id,
+        project_id=project_id,
+        location=location,
+        logger=state_manager.add_debug_log,
+    )
+
+
 def run_chatbot_app():
     st.set_page_config(page_title=config.UITexts.APP_TITLE, layout="wide")
     st.title(config.UITexts.APP_TITLE)
@@ -218,6 +299,8 @@ def run_chatbot_app():
     if "enable_report_pdf" not in st.session_state:
         st.session_state["enable_report_pdf"] = False
 
+    _ensure_user_email_from_mail_txt()
+
     # Canvas読み込み時の文字コード対応関数
     def handle_canvas_upload(index, key):
         uploaded_file = st.session_state.get(key)
@@ -239,12 +322,9 @@ def run_chatbot_app():
             # ファイルアップロード時も自動的に送信をONにする
             if 'canvas_enabled' in st.session_state and index < len(st.session_state['canvas_enabled']):
                 st.session_state['canvas_enabled'][index] = True
-                # st.session_state['canvas_enabled'][index] = True
-                #c_key = st.session_state.get('canvas_key_counter', 0)
-                # ウィジェットのセッションステートも更新
-                #st.session_state[f"en_cvs_{index}_{c_key}"] = True
-                #if index == 0:
-                #    st.session_state[f"en_cvs_s_{c_key}"] = True
+            
+            # Canvasの内容が更新されたことをエディタに通知するためカウンターをインクリメント
+            st.session_state['canvas_key_counter'] += 1
 
     sidebar.render_sidebar(
         supported_extensions, env_files, 
@@ -267,7 +347,7 @@ def run_chatbot_app():
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
-    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3-pro-preview"))
+    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.5-flash"))
     azure_rt = azure_runtime.load_azure_runtime_from_env(
         bootstrap_env_path=selected_env_file,
         logger=state_manager.add_debug_log,
@@ -776,6 +856,7 @@ def run_chatbot_app():
                 assistant_msg = {"role": "assistant", "content": full_response}
                 if current_usage:
                     assistant_msg["usage"] = current_usage
+                    _send_ai_usage_log(current_usage, model_id, project_id, location)
                 if final_grounding_metadata:
                     assistant_msg["grounding_metadata"] = final_grounding_metadata
                 if is_report_mode:
@@ -977,6 +1058,7 @@ def run_chatbot_app():
                         assistant_msg = {"role": "assistant", "content": full_response}
                         if current_usage:
                             assistant_msg["usage"] = current_usage
+                            _send_ai_usage_log(current_usage, model_id, project_id, location)
                         if final_grounding_metadata:
                             assistant_msg["grounding_metadata"] = final_grounding_metadata
                         if is_report_mode:

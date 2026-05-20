@@ -91,15 +91,21 @@ def _render_html_to_pdf(html_path, pdf_path):
         f"--print-to-pdf={abs_pdf_path}",
         html_uri,
     ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "PDF export timed out after 60 seconds."
+    except Exception as e:
+        return False, f"Error launching browser for PDF export: {e}"
+
     if result.returncode != 0:
         error_text = (result.stderr or result.stdout or "").strip()
         return False, error_text or "Browser-based PDF export failed."
