@@ -162,11 +162,13 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         # --- 2. 設定・履歴エリア ---
         def handle_full_reset():
-            keys_to_keep = ['selected_env_file']
+            keys_to_keep = ['selected_env_file', 'canvas_key_counter']
             for key, value in config.SESSION_STATE_DEFAULTS.items():
                 if key in keys_to_keep:
                     continue
                 st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
+
+            prev_canvas_counter = st.session_state.get('canvas_key_counter', 0)
 
             for key in list(st.session_state.keys()):
                 if (
@@ -179,7 +181,13 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.session_state['current_model_id'] = config.SESSION_STATE_DEFAULTS['current_model_id']
             st.session_state['reasoning_effort'] = config.SESSION_STATE_DEFAULTS['reasoning_effort']
             
-            st.session_state['canvas_key_counter'] += 1
+            # full reset 前の editor/component identity を確実に破棄するため、
+            # 既存値から単調増加させる。defaults 経由で 0 に戻してはいけない。
+            st.session_state['canvas_key_counter'] = prev_canvas_counter + 1
+            # reset 直後の 1 rerun だけ、st_ace の返す旧値で session_state が
+            # 巻き戻されるのを防ぐ。
+            st.session_state['_canvas_reset_pending'] = True
+
             if "file_uploader_key" in st.session_state:
                 st.session_state["file_uploader_key"] += 1
             else:
@@ -207,9 +215,13 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 del st.session_state['current_report_folder']
             st.session_state['enable_report_pdf'] = False
 
+            # Canvas 系 widget の旧 state を次 run へ持ち越さない
+            for key in list(st.session_state.keys()):
+                if key.startswith("ace_") or key.startswith("up_"):
+                    del st.session_state[key]
+
         st.header(config.UITexts.SIDEBAR_HEADER)
-        if st.button(config.UITexts.RESET_BUTTON_LABEL, width="stretch", disabled=is_generating, on_click=handle_full_reset):
-            st.rerun()
+        st.button(config.UITexts.RESET_BUTTON_LABEL, width="stretch", disabled=is_generating, on_click=handle_full_reset)
 
         # --- 追加機能: グラフ描画・データ分析モード ---
         if 'auto_plot_enabled' not in st.session_state:
@@ -276,7 +288,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             else:
                 st.caption("（履歴ファイルはありません）")
         else:
-             st.caption("（履歴フォルダはありません）")
+            st.caption("（履歴フォルダはありません）")
 
         st.caption("📤 JSONファイルから再開")
         
@@ -296,7 +308,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 "always_send_all_canvases": st.session_state.get('always_send_all_canvases', False),
                 "current_report_folder": st.session_state.get('current_report_folder')
             }
-            # セッションに保存されているファイル名があればそれを使い、なければ固定名にする
+            # セッションに保存されているファイル名があればそれを使い、探れば固定名にする
             dl_filename = st.session_state.get('current_chat_filename', 'gemini_chat_history.json')
             
             st.download_button(
@@ -422,6 +434,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             st.session_state['canvas_key_counter'] += 1
 
         canvases = st.session_state['python_canvases']
+        reset_pending = st.session_state.get('_canvas_reset_pending', False)
         
         # --- Canvasステータスとトグルキーの初期化 ---
         if 'canvas_enabled' not in st.session_state:
@@ -455,6 +468,10 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 updated = st_ace(value=content, key=ace_key, readonly=is_generating, auto_update=not is_generating, **config.ACE_EDITOR_SETTINGS)
                 
                 # エディタの入力判定
+                # full reset 直後の 1 run は、component 側の旧値を信用しない。
+                # ここで反映すると、初期化済み python_canvases が旧コードへ戻る。
+                if reset_pending:
+                    updated = content
                 if updated != content:
                     is_meaningful_change = updated.strip() != content.strip()
                     canvases[i] = updated
@@ -512,6 +529,10 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             # 修正: auto_update を is_generating に応じて動的に制御し、不意の rerun を防ぐ
             updated = st_ace(value=canvases[0], key=ace_key, readonly=is_generating, auto_update=not is_generating, **config.ACE_EDITOR_SETTINGS)
             
+            # full reset 直後の 1 run は、component 側の旧値を信用しない。
+            # ここで反映すると、初期化済み python_canvases が旧コードへ戻る。
+            if reset_pending:
+                updated = canvases[0]
             if updated != canvases[0]:
                 is_meaningful_change = updated.strip() != canvases[0].strip()
                 canvases[0] = updated
@@ -544,11 +565,14 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             up_key = f"up_s_{st.session_state['canvas_key_counter']}"
             st.file_uploader("Load into Canvas", type=supported_types, key=up_key, on_change=handle_file_upload, args=(0, up_key), disabled=is_generating)
             
+        if reset_pending:
+            st.session_state['_canvas_reset_pending'] = False
+
         st.markdown("---")
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.4.0</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.5.0</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>
