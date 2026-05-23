@@ -60,6 +60,51 @@ def _extract_text_from_docx(file_bytes: bytes) -> str:
         raise AzureContextBuildError(f"Failed to read docx attachment: {exc}") from exc
 
 
+def _extract_text_from_excel(file_bytes: bytes) -> str:
+    try:
+        import pandas as pd
+        excel_file = io.BytesIO(file_bytes)
+        
+        # エンジンの選定
+        engine = None
+        try:
+            import python_calamine
+            engine = "calamine"
+        except ImportError:
+            try:
+                import openpyxl
+                engine = "openpyxl"
+            except ImportError:
+                pass
+                
+        sheets = pd.read_excel(excel_file, sheet_name=None, engine=engine)
+        
+        full_text = []
+        for sheet_name, df in sheets.items():
+            full_text.append(f"### Sheet: {sheet_name}")
+            if df.empty:
+                full_text.append("(空のシートです)\n")
+                continue
+                
+            df_clean = df.fillna("")
+            
+            try:
+                markdown_table = df_clean.to_markdown(index=False)
+                full_text.append(markdown_table)
+            except ImportError:
+                csv_data = df_clean.to_csv(index=False)
+                full_text.append("```csv")
+                full_text.append(csv_data)
+                full_text.append("```")
+                
+            full_text.append("")
+            
+        return "\n".join(full_text)
+    except Exception as exc:
+        raise AzureContextBuildError(f"Failed to read Excel attachment: {exc}") from exc
+
+
+
 def _convert_ppt_to_images_core(file_bytes: bytes, filename: str) -> list[tuple[bytes, str]]:
     if not HAS_WIN32:
         raise AzureContextBuildError(
@@ -160,6 +205,18 @@ def _build_attachment_content_items(uploaded_files) -> tuple[list[dict[str, obje
             )
             meta.append({"name": filename, "type": "docx", "size": len(file_bytes)})
             continue
+
+        if file_ext in (".xlsx", ".xlsm", ".xls"):
+            text_content = _extract_text_from_excel(file_bytes)
+            content_items.append(
+                {
+                    "type": "input_text",
+                    "text": f"[Attached Excel File: {filename}]\n{text_content}",
+                }
+            )
+            meta.append({"name": filename, "type": "excel", "size": len(file_bytes)})
+            continue
+
 
         if file_ext in (".ppt", ".pptx"):
             images = _convert_ppt_to_images_win32(file_bytes, filename)

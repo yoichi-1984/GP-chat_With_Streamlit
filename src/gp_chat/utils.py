@@ -76,6 +76,54 @@ def extract_text_from_docx(file_bytes):
         return "\n".join(full_text)
     except Exception as e:
         return f"[Error parsing docx] {str(e)}"
+    
+def extract_text_from_excel(file_bytes, filename):
+    """Excelファイル(xlsx/xlsm/xls)から全シートのデータをテキスト(Markdown)として抽出する"""
+    try:
+        import pandas as pd
+        excel_file = io.BytesIO(file_bytes)
+        
+        # エンジンの選定 (calamineが利用可能なら優先、なければopenpyxlにフォールバック)
+        engine = None
+        try:
+            import python_calamine
+            engine = "calamine"
+        except ImportError:
+            try:
+                import openpyxl
+                engine = "openpyxl"
+            except ImportError:
+                pass
+                
+        # sheet_name=None で全シートを辞書形式で読み込む
+        sheets = pd.read_excel(excel_file, sheet_name=None, engine=engine)
+        
+        full_text = []
+        for sheet_name, df in sheets.items():
+            full_text.append(f"### Sheet: {sheet_name}")
+            if df.empty:
+                full_text.append("(空のシートです)\n")
+                continue
+                
+            # NaNを空文字に置換
+            df_clean = df.fillna("")
+            
+            # Markdownテーブルに変換 (tabulateがない場合はCSVにフォールバック)
+            try:
+                markdown_table = df_clean.to_markdown(index=False)
+                full_text.append(markdown_table)
+            except ImportError:
+                csv_data = df_clean.to_csv(index=False)
+                full_text.append("```csv")
+                full_text.append(csv_data)
+                full_text.append("```")
+                
+            full_text.append("")  # 改行を追加
+            
+        return "\n".join(full_text)
+    except Exception as e:
+        return f"[Error parsing Excel file {filename}] {str(e)}"
+
 
 def _convert_ppt_to_images_core(file_bytes, filename):
     """PowerPoint変換の実処理を行う内部関数"""
@@ -181,6 +229,13 @@ def process_uploaded_files_for_gemini(uploaded_files):
             prompt_text = f"\n\n[Attached Document: {filename}]\n{text_content}\n"
             api_parts.append(types.Part.from_text(text=prompt_text))
             display_info.append({"name": filename, "type": "docx", "size": len(file_bytes)})
+
+        elif file_ext in [".xlsx", ".xlsm", ".xls"]:
+            text_content = extract_text_from_excel(file_bytes, filename)
+            prompt_text = f"\n\n[Attached Excel File: {filename}]\n{text_content}\n"
+            api_parts.append(types.Part.from_text(text=prompt_text))
+            display_info.append({"name": filename, "type": "excel", "size": len(file_bytes)})
+
 
         elif file_ext in [".ppt", ".pptx"]:
             images = convert_ppt_to_images_win32(file_bytes, filename)

@@ -338,7 +338,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             
         uploader_key = f"file_uploader_{st.session_state['file_uploader_key']}"
 
-        ALLOWED_EXTENSIONS = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md", "py", "js", "json", "csv"]
+        ALLOWED_EXTENSIONS = ["png", "jpg", "jpeg", "bmp", "gif", "pdf", "docx", "pptx", "ppt", "txt", "md", "py", "js", "json", "csv", "xlsx", "xlsm", "xls"]
         uploaded_files = st.file_uploader(
             label=config.UITexts.FILE_UPLOAD_LABEL,
             type=ALLOWED_EXTENSIONS,
