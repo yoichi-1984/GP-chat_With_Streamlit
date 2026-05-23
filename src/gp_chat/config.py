@@ -79,6 +79,7 @@ AVAILABLE_MODELS = [
     "gemini-3-pro-preview",
     "gemini-3-flash-preview",
     "gemini-2.0-flash-exp",
+    "gpt-5.3-codex",
 ]
 
 # --- UI Texts ---

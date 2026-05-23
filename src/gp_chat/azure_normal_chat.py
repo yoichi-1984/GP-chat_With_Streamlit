@@ -16,10 +16,11 @@ def _thinking_enabled(effort: str) -> bool:
     return effort in ("high", "deep")
 
 
-def _thinking_label(is_special_mode: bool) -> str:
+def _thinking_label(is_special_mode: bool, is_fallback: bool = True) -> str:
+    prefix = "Azure fallback" if is_fallback else "Azure (gpt-5.3-codex)"
     if is_special_mode:
-        return "Azure fallback is processing the validation request..."
-    return "Azure fallback is generating the response..."
+        return f"{prefix} is processing the validation request..."
+    return f"{prefix} is generating the response..."
 
 
 def run_normal_generation(
@@ -33,9 +34,12 @@ def run_normal_generation(
     text_placeholder,
     thought_status,
     thought_placeholder,
+    model_id: str | None = None,
 ) -> AzureModeResult:
-    state_manager.add_debug_log("[Azure Normal] Starting Azure fallback generation.")
-    thought_status.update(label=_thinking_label(is_special_mode), state="running", expanded=False)
+    is_fallback = (model_id != "gpt-5.3-codex")
+    log_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
+    state_manager.add_debug_log(f"[{log_prefix} Normal] Starting generation.")
+    thought_status.update(label=_thinking_label(is_special_mode, is_fallback), state="running", expanded=False)
 
     full_response = ""
     full_thought_log = ""
@@ -68,10 +72,11 @@ def run_normal_generation(
             text_placeholder.markdown(full_response + "▌")
 
     text_placeholder.markdown(full_response)
+    finished_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
     if full_thought_log:
-        thought_status.update(label="Azure fallback finished thinking.", state="complete", expanded=False)
+        thought_status.update(label=f"{finished_prefix} finished thinking.", state="complete", expanded=False)
     else:
-        thought_status.update(label="Azure fallback finished.", state="complete", expanded=False)
+        thought_status.update(label=f"{finished_prefix} finished.", state="complete", expanded=False)
 
     return AzureModeResult(
         full_response=full_response,
@@ -79,7 +84,7 @@ def run_normal_generation(
         system_instruction=context.system_instruction,
         usage_metadata=latest_usage,
         grounding_metadata=final_grounding,
-        mode_meta={"llm_route": "azure_fallback", "llm_retry_count": 0},
+        mode_meta={"llm_route": "azure_fallback" if is_fallback else "azure_direct", "llm_retry_count": 0},
         available_files_map=context.available_files_map,
         file_attachments_meta=context.file_attachments_meta,
         retry_context_snapshot=context.clone_retry_context(),
@@ -95,6 +100,7 @@ def run_special_generation(
     text_placeholder,
     thought_status,
     thought_placeholder,
+    model_id: str | None = None,
 ) -> AzureModeResult:
     return run_normal_generation(
         runtime=runtime,
@@ -106,4 +112,5 @@ def run_special_generation(
         text_placeholder=text_placeholder,
         thought_status=thought_status,
         thought_placeholder=thought_placeholder,
+        model_id=model_id,
     )

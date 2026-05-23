@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 AZURE_OPENAI_ENDPOINT_NAME = "AZURE_OPENAI_ENDPOINT"
 AZURE_OPENAI_API_KEY_NAME = "AZURE_OPENAI_API_KEY"
 AZURE_OPENAI_GPT54_DEPLOYMENT_NAME = "AZURE_OPENAI_GPT54_DEPLOYMENT"
+AZURE_OPENAI_CODEX_DEPLOYMENT_NAME = "AZURE_OPENAI_CODEX_DEPLOYMENT"
 AZURE_OPENAI_ENV_FILE_NAME = "AZURE_OPENAI_ENV_FILE"
 
 LoggerFn = Callable[[str, str], None]
@@ -22,6 +23,7 @@ class AzureRuntime:
     api_key: str
     deployment: str
     base_url: str
+    codex_deployment: str = ""
 
 
 def _log(logger: LoggerFn | None, message: str, level: str = "info") -> None:
@@ -107,6 +109,11 @@ def load_azure_runtime_from_env(
         bootstrap_values,
         allow_process_fallback=allow_process_fallback,
     )
+    codex_deployment = _get_config_value(
+        AZURE_OPENAI_CODEX_DEPLOYMENT_NAME,
+        bootstrap_values,
+        allow_process_fallback=allow_process_fallback,
+    )
 
     external_env_path = _get_config_value(
         AZURE_OPENAI_ENV_FILE_NAME,
@@ -125,6 +132,10 @@ def load_azure_runtime_from_env(
             deployment = external_values.get(
                 AZURE_OPENAI_GPT54_DEPLOYMENT_NAME,
                 deployment,
+            )
+            codex_deployment = external_values.get(
+                AZURE_OPENAI_CODEX_DEPLOYMENT_NAME,
+                codex_deployment,
             )
             _log(
                 logger,
@@ -154,6 +165,7 @@ def load_azure_runtime_from_env(
         api_key=api_key,
         deployment=deployment,
         base_url=_normalize_base_url(endpoint),
+        codex_deployment=codex_deployment or deployment,
     )
 
 

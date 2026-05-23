@@ -89,6 +89,7 @@ def _run_azure_mode(
     text_placeholder,
     thought_status,
     thought_placeholder,
+    model_id=None,
 ):
     context = azure_context_builder.build_materialized_context(
         target_messages=target_messages,
@@ -154,6 +155,7 @@ def _run_azure_mode(
             text_placeholder=text_placeholder,
             thought_status=thought_status,
             thought_placeholder=thought_placeholder,
+            model_id=model_id,
         )
 
     return azure_normal_chat.run_normal_generation(
@@ -166,6 +168,7 @@ def _run_azure_mode(
         text_placeholder=text_placeholder,
         thought_status=thought_status,
         thought_placeholder=thought_placeholder,
+        model_id=model_id,
     )
 
 
@@ -263,6 +266,9 @@ def _ensure_user_email_from_mail_txt():
 def _send_ai_usage_log(current_usage, model_id, project_id, location):
     if not current_usage:
         return
+    # gpt-5.3-codex または Azureルート（フォールバック含む）を使用した場合は GCP Logging への送信をスキップ
+    if model_id == "gpt-5.3-codex" or current_usage.get("llm_route") in ("azure_fallback", "azure_direct"):
+        return
     cloud_logging_utils.write_ai_usage_log(
         current_usage=current_usage,
         user_email=st.session_state.get("user_email", ""),
@@ -352,6 +358,9 @@ def run_chatbot_app():
         bootstrap_env_path=selected_env_file,
         logger=state_manager.add_debug_log,
     )
+    if azure_rt is not None and model_id == "gpt-5.3-codex":
+        import dataclasses
+        azure_rt = dataclasses.replace(azure_rt, deployment=azure_rt.codex_deployment)
     fault_injection_cfg = azure_fault_injection.load_fault_injection_config()
     
     INPUT_LIMIT = 1000000
@@ -621,7 +630,14 @@ def run_chatbot_app():
             used_azure_fallback = False
             azure_retry_system_instruction = ""
             forced_mode_exception = None
-            if azure_supervisor_helpers.should_skip_gcp_for_mode(mode_name, fault_injection_cfg):
+            is_gpt_5_3_codex = (model_id == "gpt-5.3-codex")
+            if is_gpt_5_3_codex:
+                state_manager.add_debug_log(
+                    f"[Azure Route] Forcing direct Azure branch for model={model_id}.",
+                    "info",
+                )
+                forced_mode_exception = azure_fault_injection.build_synthetic_terminal_429(mode_name)
+            elif azure_supervisor_helpers.should_skip_gcp_for_mode(mode_name, fault_injection_cfg):
                 state_manager.add_debug_log(
                     f"[Fault Injection] Forcing direct Azure branch for mode={mode_name}.",
                     "warning",
@@ -809,6 +825,7 @@ def run_chatbot_app():
                         text_placeholder=text_placeholder,
                         thought_status=thought_status,
                         thought_placeholder=thought_placeholder,
+                        model_id=model_id,
                     )
                     used_azure_fallback = True
                     full_response = azure_result.full_response
@@ -856,7 +873,8 @@ def run_chatbot_app():
                 assistant_msg = {"role": "assistant", "content": full_response}
                 if current_usage:
                     assistant_msg["usage"] = current_usage
-                    _send_ai_usage_log(current_usage, model_id, project_id, location)
+                    if not used_azure_fallback:
+                        _send_ai_usage_log(current_usage, model_id, project_id, location)
                 if final_grounding_metadata:
                     assistant_msg["grounding_metadata"] = final_grounding_metadata
                 if is_report_mode:
@@ -1021,6 +1039,7 @@ def run_chatbot_app():
                             text_placeholder=text_placeholder,
                             thought_status=thought_status,
                             thought_placeholder=thought_placeholder,
+                            model_id=model_id,
                         )
                         used_azure_fallback = True
                         full_response = azure_result.full_response
@@ -1058,7 +1077,8 @@ def run_chatbot_app():
                         assistant_msg = {"role": "assistant", "content": full_response}
                         if current_usage:
                             assistant_msg["usage"] = current_usage
-                            _send_ai_usage_log(current_usage, model_id, project_id, location)
+                            # Azureルート使用時は GCP Logging への送信をスキップします
+                            # _send_ai_usage_log(current_usage, model_id, project_id, location)
                         if final_grounding_metadata:
                             assistant_msg["grounding_metadata"] = final_grounding_metadata
                         if is_report_mode:
