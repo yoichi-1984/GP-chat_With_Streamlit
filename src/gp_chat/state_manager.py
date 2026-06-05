@@ -31,8 +31,7 @@ def load_history(uploader_key):
             if "python_canvases" in loaded_data:
                 st.session_state['python_canvases'] = loaded_data["python_canvases"]
             
-            if "multi_code_enabled" in loaded_data:
-                st.session_state['multi_code_enabled'] = loaded_data["multi_code_enabled"]
+            st.session_state['multi_code_enabled'] = True
 
             # 保存された各種設定フラグを復元
             if "enable_more_research" in loaded_data:
@@ -104,8 +103,7 @@ def load_history_from_local(filename):
             if "python_canvases" in loaded_data:
                 st.session_state['python_canvases'] = loaded_data["python_canvases"]
             
-            if "multi_code_enabled" in loaded_data:
-                st.session_state['multi_code_enabled'] = loaded_data["multi_code_enabled"]
+            st.session_state['multi_code_enabled'] = True
 
             # 保存された各種設定フラグを復元
             if "enable_more_research" in loaded_data:

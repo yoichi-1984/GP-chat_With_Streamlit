@@ -419,16 +419,6 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             help="ONにすると、すべてのCanvasが送信対象になり、送信後もOFFに戻りません。"
         )
 
-        sel_multi = st.checkbox(
-            config.UITexts.MULTI_CODE_CHECKBOX, 
-            value=st.session_state.get('multi_code_enabled', False),
-            disabled=is_generating,
-            key=f"multi_chk_{c_key}"
-        )
-        if sel_multi != st.session_state.get('multi_code_enabled'):
-            st.session_state['multi_code_enabled'] = sel_multi
-            st.rerun()
-
         def _local_handle_clear(idx):
             handle_clear(idx)
             st.session_state['canvas_key_counter'] += 1
@@ -572,7 +562,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.5.2</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.5.3</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>

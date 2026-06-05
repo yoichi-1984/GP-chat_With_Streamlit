@@ -56,7 +56,7 @@ SESSION_STATE_DEFAULTS = {
     "is_generating": False,
     "last_usage_info": None,
     "python_canvases": [ACE_EDITOR_DEFAULT_CODE],
-    "multi_code_enabled": False,
+    "multi_code_enabled": True,
     "stop_generation": False,
     "canvas_key_counter": 0,
     "reasoning_effort": "high",
