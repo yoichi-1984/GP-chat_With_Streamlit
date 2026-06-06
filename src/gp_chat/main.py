@@ -279,6 +279,44 @@ def _send_ai_usage_log(current_usage, model_id, project_id, location):
     )
 
 
+@st.dialog("プロンプトの上書き確認")
+def show_overwrite_dialog(name, text, presets, prompts_dict):
+    st.warning(f"同名のプロンプト「{name}」が既に存在します。上書き保存してよろしいですか？")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("はい、上書きします", use_container_width=True, type="primary"):
+            new_preset = {
+                "name": name,
+                "text": text
+            }
+            updated_presets = []
+            for p in presets:
+                if p["name"] == name:
+                    updated_presets.append(new_preset)
+                else:
+                    updated_presets.append(p)
+            
+            prompts_dict["system_presets"] = updated_presets
+            prompts_dict["system"] = {
+                "text": text
+            }
+            
+            if utils.save_prompts(prompts_dict):
+                # 選択インデックスの更新
+                new_names = [p["name"] for p in updated_presets]
+                if name in new_names:
+                    st.session_state["selected_preset_index"] = new_names.index(name)
+                
+                st.session_state['messages'] = [{"role": "system", "content": text}]
+                st.session_state['system_role_defined'] = True
+                st.rerun()
+            else:
+                st.error("プロンプトの保存に失敗しました。")
+    with c2:
+        if st.button("キャンセル", use_container_width=True):
+            st.rerun()
+
+
 def run_chatbot_app():
     st.set_page_config(page_title=config.UITexts.APP_TITLE, layout="wide")
     st.title(config.UITexts.APP_TITLE)
@@ -410,12 +448,151 @@ def run_chatbot_app():
             st.text(log)
 
     if not st.session_state['system_role_defined']:
-        st.subheader("AIの役割を設定（デフォルトでも、変更してもどちらでもOK）")
-        role = st.text_area("System Role", value=PROMPTS.get("system", {}).get("text", ""), height=200)
-        if st.button("チャットを開始", type="primary"):
-            st.session_state['messages'] = [{"role": "system", "content": role}]
-            st.session_state['system_role_defined'] = True
-            st.rerun()
+        st.subheader("AIの役割を設定（プリセット選択、または新規作成）")
+        
+        presets = PROMPTS.get("system_presets", [])
+        if not presets and "system" in PROMPTS:
+            presets = [{
+                "name": "デフォルト (エンジニア向け)",
+                "text": PROMPTS["system"].get("text", "")
+            }]
+            
+        preset_names = [p["name"] for p in presets] + ["新規作成..."]
+        
+        # セレクトボックスでプリセットを選択
+        selected_index = 0
+        if "selected_preset_index" in st.session_state:
+            # 範囲外チェック
+            if st.session_state["selected_preset_index"] < len(preset_names):
+                selected_index = st.session_state["selected_preset_index"]
+                
+        selected_name = st.selectbox(
+            "プリセットプロンプトを選択", 
+            preset_names, 
+            index=selected_index,
+            key="preset_selector"
+        )
+        
+        # 選択状態を記憶
+        current_idx = preset_names.index(selected_name)
+        st.session_state["selected_preset_index"] = current_idx
+        
+        # 編集用フィールドの初期値設定
+        if selected_name == "新規作成...":
+            default_text = ""
+            default_save_name = ""
+        else:
+            preset_data = presets[current_idx]
+            default_text = preset_data.get("text", "")
+            default_save_name = ""  # デフォルトでは常に空欄にする
+            
+        promo_text = st.text_area("プロンプト内容 (System Role)", value=default_text, height=250)
+        
+        # ボタンと保存用プロンプト名入力欄の配置
+        col_left, col_right = st.columns([1, 1])
+        
+        # ボタンのkeyを利用して、CSSで個別にスタイルを適用
+        st.markdown("""
+            <style>
+            /* 左ボタン (このまま実行): 赤背景白字 */
+            .st-key-run_without_save_btn button {
+                border: 2px solid #ff4b4b !important;
+                background-color: #ff4b4b !important;
+                color: #ffffff !important;
+                width: 100% !important;
+            }
+            .st-key-run_without_save_btn button:hover {
+                background-color: #ff3333 !important;
+                border-color: #ff3333 !important;
+                color: #ffffff !important;
+            }
+            
+            /* 右ボタン (保存して実行): 白枠黒字 */
+            .st-key-save_and_run_btn button {
+                border: 2px solid #000000 !important;
+                background-color: #ffffff !important;
+                color: #000000 !important;
+                width: 100% !important;
+            }
+            .st-key-save_and_run_btn button:hover {
+                background-color: #000000 !important;
+                color: #ffffff !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+        with col_left:
+            run_without_save = st.button(
+                "このまま実行(追加保存無し)", 
+                key="run_without_save_btn", 
+                use_container_width=True
+            )
+            
+        with col_right:
+            save_and_run = st.button(
+                "保存して実行", 
+                key="save_and_run_btn", 
+                use_container_width=True
+            )
+            
+            # 保存するプロンプト名入力テキストボックス
+            promo_name_input = st.text_input(
+                "保存するプロンプト名", 
+                value=default_save_name, 
+                placeholder="例: 翻訳アシスタント",
+                label_visibility="visible"
+            )
+            
+        if run_without_save:
+            if not promo_text.strip():
+                st.error("プロンプト内容を入力してください。")
+            else:
+                st.session_state['messages'] = [{"role": "system", "content": promo_text}]
+                st.session_state['system_role_defined'] = True
+                st.rerun()
+                
+        if save_and_run:
+            if not promo_name_input.strip():
+                st.error("⚠️ プロンプト名を入力してください。")
+            elif not promo_text.strip():
+                st.error("⚠️ プロンプト内容を入力してください。")
+            else:
+                name = promo_name_input.strip()
+                # 既に同名のプリセットがあるかチェック
+                exists = any(p["name"] == name for p in presets)
+                if exists:
+                    # ダイアログを表示して上書き確認を行う
+                    show_overwrite_dialog(name, promo_text, presets, PROMPTS)
+                else:
+                    # 新規保存処理
+                    new_preset = {
+                        "name": name,
+                        "text": promo_text
+                    }
+                    updated_presets = presets + [new_preset]
+                    
+                    # PROMPTS 辞書全体を更新
+                    PROMPTS["system_presets"] = updated_presets
+                    PROMPTS["system"] = {
+                        "text": promo_text
+                    }
+                    
+                    # YAMLファイルへ保存
+                    if utils.save_prompts(PROMPTS):
+                        st.toast("✅ プロンプトを保存しました", icon="💾")
+                    else:
+                        st.error("プロンプトの保存に失敗しました。")
+                    
+                    # 新しく保存したプリセットが次回選択されるようにインデックスを設定
+                    new_names = [p["name"] for p in updated_presets]
+                    if name in new_names:
+                        st.session_state["selected_preset_index"] = new_names.index(name)
+                    
+                    # セッションステートに設定して実行
+                    st.session_state['messages'] = [{"role": "system", "content": promo_text}]
+                    st.session_state['system_role_defined'] = True
+                    st.rerun()
+                
         st.stop()
 
     # --- 新規追加: チャット分岐処理用のコールバック関数 ---

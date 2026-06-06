@@ -40,22 +40,65 @@ try:
 except ImportError:
     HAS_WIN32 = False
 
-@st.cache_data
 def load_prompts():
-    """パッケージ内のprompts.yamlを一度だけ読み込み、結果をキャッシュする"""
+    """ルート直下の prompts/prompts.yaml を優先して読み込み、無ければデフォルトから自動コピーする"""
+    local_prompts_dir = "prompts"
+    local_prompts_path = os.path.join(local_prompts_dir, "prompts.yaml")
+    
+    # 1. ルート直下の prompts/prompts.yaml をチェック
+    if os.path.exists(local_prompts_path):
+        try:
+            with open(local_prompts_path, "r", encoding="utf-8") as f:
+                yaml_data = yaml.safe_load(f)
+                if yaml_data and "prompts" in yaml_data:
+                    return yaml_data.get("prompts", {})
+        except Exception as e:
+            print(f"Warning: Failed to load local prompts/prompts.yaml: {e}")
+
+    # 2. 存在しないか読み込み失敗した場合、デフォルトをロードしてコピーを作成
+    default_data = None
+    
+    # パッケージ内リソースからの読み込みを試行
     try:
         with resources.open_text("gp_chat", "prompts.yaml") as f:
-            yaml_data = yaml.safe_load(f)
-            return yaml_data.get("prompts", {})
+            default_data = yaml.safe_load(f)
     except Exception as e:
-        # パッケージ化されていない場合(ローカル実行時)のフォールバック
+        # パッケージ化されていない場合のフォールバック（開発時のカレントディレクトリ）
         try:
             with open("prompts.yaml", "r", encoding="utf-8") as f:
-                yaml_data = yaml.safe_load(f)
-                return yaml_data.get("prompts", {})
+                default_data = yaml.safe_load(f)
         except Exception as e2:
-            print(f"Warning: prompts.yaml load failed: {e}, {e2}")
-            return {}
+            print(f"Warning: Default prompts.yaml load failed: {e}, {e2}")
+
+    # デフォルトデータのロードに成功した場合、それをローカルに保存して返す
+    if default_data and "prompts" in default_data:
+        try:
+            os.makedirs(local_prompts_dir, exist_ok=True)
+            with open(local_prompts_path, "w", encoding="utf-8") as f:
+                yaml.dump(default_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            print(f"Created local prompts copy at: {local_prompts_path}")
+        except Exception as e:
+            print(f"Warning: Failed to copy prompts.yaml to local dir: {e}")
+        return default_data.get("prompts", {})
+        
+    return {}
+
+def save_prompts(prompts_dict):
+    """ルート直下の prompts/prompts.yaml にプロンプトデータを書き込む"""
+    local_prompts_dir = "prompts"
+    local_prompts_path = os.path.join(local_prompts_dir, "prompts.yaml")
+    
+    try:
+        os.makedirs(local_prompts_dir, exist_ok=True)
+        # YAMLファイル全体の構造を作る
+        yaml_data = {"prompts": prompts_dict}
+        with open(local_prompts_path, "w", encoding="utf-8") as f:
+            yaml.dump(yaml_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        return True
+    except Exception as e:
+        print(f"Error: Failed to save prompts to {local_prompts_path}: {e}")
+        return False
+
 
 def find_env_files(directory="env"):
     """指定されたディレクトリ内の.envファイルを検索する"""

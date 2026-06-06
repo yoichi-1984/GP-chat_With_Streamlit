@@ -428,7 +428,8 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         
         # --- Canvasステータスとトグルキーの初期化 ---
         if 'canvas_enabled' not in st.session_state:
-            st.session_state['canvas_enabled'] = [True] * max(len(canvases), 5)
+            # 1個目のCanvasは初期状態で何も入力されていないためOFF(False)にし、2個目以降をTrueで初期化
+            st.session_state['canvas_enabled'] = [False] + [True] * (max(len(canvases), 5) - 1)
         while len(st.session_state['canvas_enabled']) < len(canvases):
             st.session_state['canvas_enabled'].append(True)
 
@@ -562,7 +563,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.5.3</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.5.4</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>
