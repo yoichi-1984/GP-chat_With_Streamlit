@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gp-chat"
-version = "0.5.4"
+version = "0.6.0"
 description = "GP-chat with Streamlit"
 authors = [
     { name = "yoichi-1984", email = "yoichi.1984.engineer@gmail.com" },
@@ -18,11 +18,10 @@ dependencies = [
     "google-cloud-logging==3.15.0",
     "python-dotenv==1.2.1",
     "streamlit-ace==0.1.1",
-    "build==1.3.0",
     "pylint==4.0.4",
     "PyYAML==6.0.3",
     "python-docx==1.2.0",
-    "pywin32==311",
+    "pywin32==311; sys_platform == 'win32'",
     "pillow==11.1.0",
     "pandas==2.3.3",
     "matplotlib==3.10.8",
@@ -30,7 +29,9 @@ dependencies = [
     "openpyxl>=3.1.2",
     "xlrd>=2.0.1",
     "python-calamine>=0.2.0",
-    "tabulate>=0.9.0"
+    "tabulate>=0.9.0",
+    "python-pptx>=1.0.2",
+    "playwright>=1.49.0"
 ]
 
 [project.scripts]
@@ -40,4 +41,4 @@ gp-chat = "gp_chat.main_runner:run"
 where = ["src"]
 
 [tool.setuptools.package-data]
-gp_chat = ["*.yaml"]
+gp_chat = ["*.yaml", "*.pptx"]

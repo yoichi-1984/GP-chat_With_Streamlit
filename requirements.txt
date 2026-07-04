@@ -5,3 +5,5 @@ streamlit-ace
 build
 pylint
 pyyaml
+python-pptx
+playwright

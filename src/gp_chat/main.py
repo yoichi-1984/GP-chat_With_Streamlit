@@ -3,6 +3,7 @@ import sys
 import base64
 import json
 import datetime
+import asyncio
 from pathlib import Path
 
 import streamlit as st
@@ -33,6 +34,7 @@ try:
     from gp_chat import azure_history_utils
     from gp_chat import azure_supervisor_helpers
     from gp_chat import cloud_logging_utils
+    from gp_chat import pptx_agent
     from gp_chat.azure_common_types import AzureModeResult
 except ImportError:
     import config
@@ -44,6 +46,7 @@ except ImportError:
     import research_agent
     import reasoning_agent
     import report_agent
+    import pptx_agent
     import llm_router
     import azure_runtime
     import azure_fault_injection
@@ -652,6 +655,24 @@ def run_chatbot_app():
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
                 
+                # --- PowerPointダウンロードボタン表示ロジック ---
+                if "pptx_path" in msg and msg["pptx_path"]:
+                    pptx_path = msg["pptx_path"]
+                    if os.path.exists(pptx_path):
+                        try:
+                            with open(pptx_path, "rb") as f:
+                                st.download_button(
+                                    label="Download .pptx File",
+                                    data=f.read(),
+                                    file_name=os.path.basename(pptx_path),
+                                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                    key=f"pptx_dl_{i}"
+                                )
+                        except Exception as e:
+                            st.error(f"PowerPointファイルの読み込みに失敗しました: {e}")
+                    else:
+                        st.warning("生成されたPowerPointファイルが見つかりません。")
+
                 # --- 画像 (グラフ) の表示ロジック ---
                 if "images" in msg and msg["images"]:
                     for img_b64 in msg["images"]:
@@ -795,7 +816,9 @@ def run_chatbot_app():
 
             is_more_research = st.session_state.get('enable_more_research', False) and not is_special_mode
             effort = st.session_state.get('reasoning_effort', 'high')
-            is_report_mode = st.session_state.get('enable_report_pdf', False) and not is_special_mode
+            is_report_pdf = st.session_state.get('enable_report_pdf', False) and not is_special_mode
+            is_report_pptx = st.session_state.get('enable_report_pptx', False) and not is_special_mode
+            is_report_mode = is_report_pdf or is_report_pptx
             is_deep_reasoning = (effort == 'deep') and not is_more_research and not is_report_mode and not is_special_mode
             mode_name = _resolve_mode_name(
                 is_special_mode=is_special_mode,
@@ -886,22 +909,84 @@ def run_chatbot_app():
                 mode_llm_meta = {}
 
                 if is_report_mode:
-                    full_response, usage_metadata, _report_metadata = report_agent.run_report_generation(
-                        client=client,
-                        model_id=model_id,
-                        prompts=PROMPTS,
-                        chat_contents=chat_contents,
-                        messages=target_messages,
-                        system_instruction=system_instruction,
-                        max_output_tokens=max_tokens_val,
-                        text_placeholder=text_placeholder,
-                        thought_status=thought_status
-                    )
-                    mode_llm_meta = {
-                        "llm_route": _report_metadata.get("llm_route"),
-                        "llm_retry_count": _report_metadata.get("llm_retry_count", 0),
-                    }
-                    thought_area_container.empty()
+                    if is_report_pptx:
+                        thought_status.update(label="PowerPointスライドを生成中...", state="running", expanded=False)
+                        state_manager.add_debug_log("[Report Agent] PPTX generation pipeline starting...")
+                        
+                        # 添付された画像ファイルを抽出して収集
+                        user_images = []
+                        for f_item in st.session_state.get('uploaded_file_queue', []):
+                            if hasattr(f_item, 'type') and f_item.type.startswith("image/"):
+                                user_images.append({
+                                    "name": f_item.name,
+                                    "bytes": f_item.getvalue(),
+                                    "type": f_item.type
+                                })
+                        for f_item in st.session_state.get('clipboard_queue', []):
+                            if hasattr(f_item, 'type') and f_item.type.startswith("image/"):
+                                user_images.append({
+                                    "name": f_item.name,
+                                    "bytes": f_item.getvalue(),
+                                    "type": f_item.type
+                                })
+
+                        agent_instance = pptx_agent.PPTXAgent(client=client)
+                        try:
+                            output_pptx_path = agent_instance.generate_presentation_pipeline(
+                                chat_history=target_messages,
+                                session_id=st.session_state.get("session_id", "default_uuid"),
+                                model_id=model_id,
+                                user_images=user_images
+                            )
+                            
+                            full_response = (
+                                "PowerPointプレゼンテーション資料の作成が完了しました。\n\n"
+                                f"保存先: `{output_pptx_path}`"
+                            )
+                            usage_metadata = None
+                            _report_metadata = {
+                                "pdf_success": False,
+                                "llm_route": "standard",
+                                "llm_retry_count": 0,
+                                "pptx_path": output_pptx_path
+                            }
+                            thought_status.update(label="PowerPoint生成完了", state="complete", expanded=False)
+                        except Exception as e:
+                            import traceback
+                            tb_str = traceback.format_exc()
+                            full_response = f"PowerPoint資料の生成に失敗しました: {repr(e)}"
+                            _report_metadata = {
+                                "pdf_success": False,
+                                "llm_route": "standard",
+                                "llm_retry_count": 0
+                            }
+                            thought_status.update(label="PowerPoint生成失敗", state="error", expanded=True)
+                            state_manager.add_debug_log(f"[Report Agent] PPTX generation failed: {repr(e)}\n{tb_str}", "error")
+                            raise
+                            
+                        text_placeholder.markdown(full_response)
+                        mode_llm_meta = {
+                            "llm_route": _report_metadata.get("llm_route"),
+                            "llm_retry_count": _report_metadata.get("llm_retry_count", 0),
+                        }
+                        thought_area_container.empty()
+                    else:
+                        full_response, usage_metadata, _report_metadata = report_agent.run_report_generation(
+                            client=client,
+                            model_id=model_id,
+                            prompts=PROMPTS,
+                            chat_contents=chat_contents,
+                            messages=target_messages,
+                            system_instruction=system_instruction,
+                            max_output_tokens=max_tokens_val,
+                            text_placeholder=text_placeholder,
+                            thought_status=thought_status
+                        )
+                        mode_llm_meta = {
+                            "llm_route": _report_metadata.get("llm_route"),
+                            "llm_retry_count": _report_metadata.get("llm_retry_count", 0),
+                        }
+                        thought_area_container.empty()
                 elif is_more_research:
                     full_response, usage_metadata, final_grounding_metadata, mode_llm_meta = research_agent.run_deep_research(
                         client=client,
@@ -1056,6 +1141,8 @@ def run_chatbot_app():
                     assistant_msg["grounding_metadata"] = final_grounding_metadata
                 if is_report_mode:
                     assistant_msg["report_mode"] = True
+                    if '_report_metadata' in locals() and _report_metadata and "pptx_path" in _report_metadata:
+                        assistant_msg["pptx_path"] = _report_metadata["pptx_path"]
                 
                 if is_special_mode:
                     for m in target_messages:
@@ -1260,6 +1347,8 @@ def run_chatbot_app():
                             assistant_msg["grounding_metadata"] = final_grounding_metadata
                         if is_report_mode:
                             assistant_msg["report_mode"] = True
+                            if 'mode_llm_meta' in locals() and mode_llm_meta and "pptx_path" in mode_llm_meta:
+                                assistant_msg["pptx_path"] = mode_llm_meta["pptx_path"]
 
                         if is_special_mode:
                             for m in target_messages:

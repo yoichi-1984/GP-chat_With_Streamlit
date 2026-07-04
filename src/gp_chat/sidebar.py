@@ -92,27 +92,31 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         # --- More Research Mode と UI連動・ロック機構 ---
         if 'enable_report_pdf' not in st.session_state:
             st.session_state['enable_report_pdf'] = False
+        if 'enable_report_pptx' not in st.session_state:
+            st.session_state['enable_report_pptx'] = False
         
-        is_report_mode = st.session_state.get('enable_report_pdf', False)
+        is_report_pdf = st.session_state.get('enable_report_pdf', False)
+        is_report_pptx = st.session_state.get('enable_report_pptx', False)
+        is_any_report_mode = is_report_pdf or is_report_pptx
         is_more_research = st.session_state.get('enable_more_research', False)
 
         effort_options = ['high', 'low', 'deep']
-        curr_effort = 'high' if (is_more_research or is_report_mode) else st.session_state.get('reasoning_effort', 'high')
+        curr_effort = 'high' if (is_more_research or is_any_report_mode) else st.session_state.get('reasoning_effort', 'high')
         effort_idx = effort_options.index(curr_effort) if curr_effort in effort_options else 0
 
         sel_effort = st.selectbox(
             label="Thinking Level",
             options=effort_options,
             index=effort_idx,
-            disabled=is_more_research or is_report_mode or is_generating, 
-            help="high: 標準の推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research or Report Mode)" if (is_more_research or is_report_mode) else ""),
+            disabled=is_more_research or is_any_report_mode or is_generating, 
+            help="high: 標準の推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research or Report Mode)" if (is_more_research or is_any_report_mode) else ""),
             key=f"effort_sel_{c_key}" 
         )
-        if not is_more_research and not is_report_mode and sel_effort != st.session_state.get('reasoning_effort', 'high'):
+        if not is_more_research and not is_any_report_mode and sel_effort != st.session_state.get('reasoning_effort', 'high'):
             st.session_state['reasoning_effort'] = sel_effort
             st.rerun()
 
-        is_deep_reasoning = (st.session_state.get('reasoning_effort') == 'deep') and not is_report_mode
+        is_deep_reasoning = (st.session_state.get('reasoning_effort') == 'deep') and not is_any_report_mode
 
         curr_search = st.session_state.get('enable_google_search', False)
         if is_more_research:
@@ -132,8 +136,8 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         sel_more_research = st.checkbox(
             label=config.UITexts.MORE_RESEARCH_LABEL,
             value=is_more_research,
-            disabled=is_deep_reasoning or is_report_mode or is_generating,
-            help=config.UITexts.MORE_RESEARCH_HELP + (" (Disabled while Report PDF mode is ON)" if is_report_mode else ""),
+            disabled=is_deep_reasoning or is_any_report_mode or is_generating,
+            help=config.UITexts.MORE_RESEARCH_HELP + (" (Disabled while Report mode is ON)" if is_any_report_mode else ""),
             key=f"more_res_chk_{c_key}" 
         )
         
@@ -146,14 +150,30 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         sel_report_pdf = st.checkbox(
             label="レポート機能（pdf）",
-            value=is_report_mode,
-            disabled=is_more_research or is_deep_reasoning or is_generating,
-            help="ON の間は通常回答の代わりに HTML スライドを生成し、./slide_data 配下へ HTML と PDF を保存します。" + (" (Disabled while More Research or Deep Reasoning is active)" if (is_more_research or is_deep_reasoning) else ""),
+            value=is_report_pdf,
+            disabled=is_more_research or is_deep_reasoning or is_report_pptx or is_generating,
+            help="ON の間は通常回答の代わりに HTML スライドを生成し、./slide_data 配下へ HTML と PDF を保存します。" + (" (Disabled while PowerPoint mode is ON)" if is_report_pptx else ""),
             key=f"report_pdf_chk_{c_key}"
         )
-        if sel_report_pdf != is_report_mode:
+        if sel_report_pdf != is_report_pdf:
             st.session_state['enable_report_pdf'] = sel_report_pdf
             if sel_report_pdf:
+                st.session_state['enable_report_pptx'] = False
+                st.session_state['enable_more_research'] = False
+                st.session_state['reasoning_effort'] = 'high'
+            st.rerun()
+
+        sel_report_pptx = st.checkbox(
+            label="レポート機能（pptx）",
+            value=is_report_pptx,
+            disabled=is_more_research or is_deep_reasoning or is_report_pdf or is_generating,
+            help="ON の間は通常回答の代わりに PowerPoint スライドを生成し、./slide_data 配下へ保存します。" + (" (Disabled while PDF mode is ON)" if is_report_pdf else ""),
+            key=f"report_pptx_chk_{c_key}"
+        )
+        if sel_report_pptx != is_report_pptx:
+            st.session_state['enable_report_pptx'] = sel_report_pptx
+            if sel_report_pptx:
+                st.session_state['enable_report_pdf'] = False
                 st.session_state['enable_more_research'] = False
                 st.session_state['reasoning_effort'] = 'high'
             st.rerun()
@@ -214,6 +234,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             if 'current_report_folder' in st.session_state:
                 del st.session_state['current_report_folder']
             st.session_state['enable_report_pdf'] = False
+            st.session_state['enable_report_pptx'] = False
 
             # Canvas 系 widget の旧 state を次 run へ持ち越さない
             for key in list(st.session_state.keys()):
@@ -299,6 +320,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 "multi_code_enabled": st.session_state.get('multi_code_enabled', False),
                 "enable_more_research": st.session_state.get('enable_more_research', False),
                 "enable_report_pdf": st.session_state.get('enable_report_pdf', False),
+                "enable_report_pptx": st.session_state.get('enable_report_pptx', False),
                 "enable_google_search": st.session_state.get('enable_google_search', False),
                 "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
                 "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
@@ -563,7 +585,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.5.4</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.6.0</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>
