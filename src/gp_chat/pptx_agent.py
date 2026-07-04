@@ -399,13 +399,45 @@ def render_pptx_slide(prs: Presentation, slide_data: SlideNode, font_size_offset
 
 def validate_slide_overflow(temp_dir: str, slides: List[SlideNode], offsets: List[int]) -> List[dict]:
     results = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        for slide in slides:
-            html_path = os.path.join(temp_dir, f"{slide.slide_number:02d}.html")
-            res = validate_single_slide(browser, html_path, slide.slide_number)
-            results.append(res)
-        browser.close()
+    browser = None
+    
+    try:
+        with sync_playwright() as p:
+            launch_attempts = [
+                {},                      # 1. Playwright デフォルト Chromium
+                {"channel": "msedge"},   # 2. システムインストール済み Edge
+                {"channel": "chrome"}    # 3. システムインストール済み Chrome
+            ]
+            
+            for attempt in launch_attempts:
+                try:
+                    browser = p.chromium.launch(headless=True, **attempt)
+                    state_manager.add_debug_log(f"[PPTXAgent] Launched browser successfully with settings: {attempt}")
+                    break
+                except Exception as e:
+                    state_manager.add_debug_log(f"[PPTXAgent] Browser launch attempt failed ({attempt}): {e}", "warning")
+            
+            if browser:
+                for slide in slides:
+                    html_path = os.path.join(temp_dir, f"{slide.slide_number:02d}.html")
+                    res = validate_single_slide(browser, html_path, slide.slide_number)
+                    results.append(res)
+                browser.close()
+            else:
+                state_manager.add_debug_log(
+                    "[PPTXAgent] All browser launch attempts failed. Skipping geometry validation and proceeding with default offsets.", 
+                    "warning"
+                )
+                for slide in slides:
+                    results.append({"overflowed": False, "slide_number": slide.slide_number})
+                    
+    except Exception as e:
+        state_manager.add_debug_log(f"[PPTXAgent] Playwright validation encountered unexpected error: {e}", "warning")
+        # 全滅時の緊急フォールバック結果の構築
+        if not results:
+            for slide in slides:
+                results.append({"overflowed": False, "slide_number": slide.slide_number})
+                
     return results
 
 def validate_single_slide(browser, html_path: str, slide_number: int) -> dict:

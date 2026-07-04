@@ -100,14 +100,25 @@ def save_auto_history(
     os.makedirs(log_dir, exist_ok=True)
 
     valid_msgs = [message for message in messages if message["role"] != "system"]
-    if len(valid_msgs) < 4:
+    
+    # 1往復（2メッセージ）未満は保存しない
+    if len(valid_msgs) < 2:
         return None
 
-    if not current_filename:
+    old_file_to_delete = None
+
+    # 初回（ファイル名未定）または 2往復目（メッセージ数がちょうど4件）の時にタイトルを生成/更新する
+    if not current_filename or len(valid_msgs) == 4:
         date_prefix = datetime.datetime.now().strftime("%y%m%d")
         chat_title = generate_chat_title(messages, runtime)
         base_filename = f"{date_prefix}_{chat_title}.json"
-        current_filename = get_unique_filename(log_dir, base_filename)
+        new_filename = get_unique_filename(log_dir, base_filename)
+        
+        # 2往復目でファイル名が変わる場合、古いファイルを削除対象にする
+        if current_filename and current_filename != new_filename:
+            old_file_to_delete = os.path.join(log_dir, current_filename)
+            
+        current_filename = new_filename
 
     history_data = {
         "messages": messages,
@@ -128,6 +139,14 @@ def save_auto_history(
 
     file_path = os.path.join(log_dir, current_filename)
     try:
+        # 古いファイルを安全に削除
+        if old_file_to_delete and os.path.exists(old_file_to_delete):
+            try:
+                os.remove(old_file_to_delete)
+                print(f"Deleted old chat log file: {old_file_to_delete}")
+            except Exception as e:
+                print(f"Failed to delete old file {old_file_to_delete}: {e}")
+
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(history_data, f, ensure_ascii=False, indent=2)
         return current_filename
