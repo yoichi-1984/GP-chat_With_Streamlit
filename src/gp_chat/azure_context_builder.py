@@ -140,7 +140,11 @@ def _convert_ppt_to_images_core(file_bytes: bytes, filename: str) -> list[tuple[
                     presentation.Close()
                 except Exception:
                     pass
-            ppt_app = None
+            if ppt_app:
+                try:
+                    ppt_app.Quit()
+                except Exception:
+                    pass
             try:
                 pythoncom.CoUninitialize()
             except Exception:

@@ -126,6 +126,7 @@ def save_auto_history(
         "multi_code_enabled": multi_code_enabled,
         "enable_more_research": st.session_state.get("enable_more_research", False),
         "enable_report_pdf": st.session_state.get("enable_report_pdf", False),
+        "enable_report_pptx": st.session_state.get("enable_report_pptx", False),
         "enable_google_search": st.session_state.get("enable_google_search", False),
         "reasoning_effort": st.session_state.get("reasoning_effort", "high"),
         "auto_plot_enabled": st.session_state.get("auto_plot_enabled", False),

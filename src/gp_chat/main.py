@@ -929,6 +929,21 @@ def run_chatbot_app():
                                     "bytes": f_item.getvalue(),
                                     "type": f_item.type
                                 })
+                                
+                        pptx_tools_config = tools_config
+                        if not pptx_tools_config and not is_special_mode:
+                            state_manager.add_debug_log(
+                                "[Report Agent] PPTX mode forcing Google Search Tool for source brief grounding."
+                            )
+                            pptx_tools_config = [types.Tool(google_search=types.GoogleSearch())]
+                            
+                        conversation_grounding_metadata = None
+                        for msg in target_messages:
+                            if msg.get("grounding_metadata"):
+                                conversation_grounding_metadata = llm_router.merge_grounding_metadata(
+                                    conversation_grounding_metadata,
+                                    msg.get("grounding_metadata"),
+                                )
 
                         agent_instance = pptx_agent.PPTXAgent(client=client)
                         try:
@@ -936,7 +951,12 @@ def run_chatbot_app():
                                 chat_history=target_messages,
                                 session_id=st.session_state.get("session_id", "default_uuid"),
                                 model_id=model_id,
-                                user_images=user_images
+                                user_images=user_images,
+                                materialized_contents=retry_context_snapshot,
+                                materialized_system_instruction=system_instruction,
+                                file_attachments_meta=file_attachments_meta,
+                                tools_config=pptx_tools_config,
+                                conversation_grounding_metadata=conversation_grounding_metadata,
                             )
                             
                             full_response = (

@@ -199,7 +199,11 @@ def _convert_ppt_to_images_core(file_bytes, filename):
                     presentation.Close()
                 except Exception:
                     pass
-            ppt_app = None
+            if ppt_app:
+                try:
+                    ppt_ap.Quit()
+                except Exception:
+                    pass
             try:
                 pythoncom.CoUninitialize()
             except Exception:
@@ -488,6 +492,7 @@ def save_auto_history(messages, canvases, multi_code_enabled, client_or_llm_clie
         "multi_code_enabled": multi_code_enabled,
         "enable_more_research": st.session_state.get('enable_more_research', False),
         "enable_report_pdf": st.session_state.get('enable_report_pdf', False),
+        "enable_report_pptx": st.session_state.get('enable_report_pptx', False),       
         "enable_google_search": st.session_state.get('enable_google_search', False),
         "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
         "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
