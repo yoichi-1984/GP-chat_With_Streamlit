@@ -406,11 +406,8 @@ def generate_chat_title(messages, client_or_llm_clients, model_id=None):
     会話履歴からチャット名を生成する。
     """
     try:
-        resolved_model_id = (
-            model_id
-            or st.session_state.get('current_model_id')
-            or os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.5-flash")
-        )
+        # タイトル生成は高速・軽量なモデルに固定する
+        resolved_model_id = "gemini-3.1-flash-lite"
         llm_clients = llm_router.coerce_llm_clients(client_or_llm_clients)
         conversation_text = ""
         for m in messages:
@@ -428,11 +425,8 @@ def generate_chat_title(messages, client_or_llm_clients, model_id=None):
             max_output_tokens=1000,
             temperature=0.1
         )
-        if "gemini-3" in resolved_model_id:
-             gen_config.thinking_config = types.ThinkingConfig(
-                thinking_level=types.ThinkingLevel.LOW,
-                include_thoughts=True
-            )
+        # タイトル生成には思考プロセス（Thinking）は不要なため、thinking_config は設定しない
+
 
         response = llm_router.generate_content_with_route(
             llm_clients=llm_clients,
