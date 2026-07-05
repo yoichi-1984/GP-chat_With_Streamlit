@@ -201,7 +201,7 @@ def _convert_ppt_to_images_core(file_bytes, filename):
                     pass
             if ppt_app:
                 try:
-                    ppt_ap.Quit()
+                    ppt_app.Quit()
                 except Exception:
                     pass
             try:
