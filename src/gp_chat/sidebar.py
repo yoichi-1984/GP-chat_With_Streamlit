@@ -100,7 +100,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         is_any_report_mode = is_report_pdf or is_report_pptx
         is_more_research = st.session_state.get('enable_more_research', False)
 
-        effort_options = ['high', 'low', 'deep']
+        effort_options = ['high', 'medium', 'low', 'deep']
         curr_effort = 'high' if (is_more_research or is_any_report_mode) else st.session_state.get('reasoning_effort', 'high')
         effort_idx = effort_options.index(curr_effort) if curr_effort in effort_options else 0
 
@@ -109,7 +109,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             options=effort_options,
             index=effort_idx,
             disabled=is_more_research or is_any_report_mode or is_generating, 
-            help="high: 標準の推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research or Report Mode)" if (is_more_research or is_any_report_mode) else ""),
+            help="high: 標準の推論. medium: やや抑えた推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research or Report Mode)" if (is_more_research or is_any_report_mode) else ""),
             key=f"effort_sel_{c_key}" 
         )
         if not is_more_research and not is_any_report_mode and sel_effort != st.session_state.get('reasoning_effort', 'high'):

@@ -269,8 +269,8 @@ def _ensure_user_email_from_mail_txt():
 def _send_ai_usage_log(current_usage, model_id, project_id, location):
     if not current_usage:
         return
-    # gpt-5.3-codex または Azureルート（フォールバック含む）を使用した場合は GCP Logging への送信をスキップ
-    if model_id == "gpt-5.3-codex" or current_usage.get("llm_route") in ("azure_fallback", "azure_direct"):
+    # gpt-5.3-codex, gpt-5.6 または Azureルート（フォールバック含む）を使用した場合は GCP Logging への送信をスキップ
+    if model_id in ("gpt-5.3-codex", "gpt-5.6") or current_usage.get("llm_route") in ("azure_fallback", "azure_direct"):
         return
     cloud_logging_utils.write_ai_usage_log(
         current_usage=current_usage,
@@ -399,9 +399,12 @@ def run_chatbot_app():
         bootstrap_env_path=selected_env_file,
         logger=state_manager.add_debug_log,
     )
-    if azure_rt is not None and model_id == "gpt-5.3-codex":
+    if azure_rt is not None:
         import dataclasses
-        azure_rt = dataclasses.replace(azure_rt, deployment=azure_rt.codex_deployment)
+        if model_id == "gpt-5.3-codex":
+            azure_rt = dataclasses.replace(azure_rt, deployment=azure_rt.codex_deployment)
+        elif model_id == "gpt-5.6":
+            azure_rt = dataclasses.replace(azure_rt, deployment=azure_rt.sol_deployment)
     fault_injection_cfg = azure_fault_injection.load_fault_injection_config()
     
     INPUT_LIMIT = 1000000
@@ -830,8 +833,8 @@ def run_chatbot_app():
             used_azure_fallback = False
             azure_retry_system_instruction = ""
             forced_mode_exception = None
-            is_gpt_5_3_codex = (model_id == "gpt-5.3-codex")
-            if is_gpt_5_3_codex:
+            is_azure_direct_model = (model_id in ("gpt-5.3-codex", "gpt-5.6"))
+            if is_azure_direct_model:
                 state_manager.add_debug_log(
                     f"[Azure Route] Forcing direct Azure branch for model={model_id}.",
                     "info",

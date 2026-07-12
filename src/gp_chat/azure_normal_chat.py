@@ -13,11 +13,11 @@ from .azure_runtime import AzureRuntime
 
 
 def _thinking_enabled(effort: str) -> bool:
-    return effort in ("high", "deep")
+    return effort in ("low", "medium", "high", "deep")
 
 
-def _thinking_label(is_special_mode: bool, is_fallback: bool = True) -> str:
-    prefix = "Azure fallback" if is_fallback else "Azure (gpt-5.3-codex)"
+def _thinking_label(is_special_mode: bool, is_fallback: bool = True, model_id: str | None = None) -> str:
+    prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
     if is_special_mode:
         return f"{prefix} is processing the validation request..."
     return f"{prefix} is generating the response..."
@@ -36,15 +36,18 @@ def run_normal_generation(
     thought_placeholder,
     model_id: str | None = None,
 ) -> AzureModeResult:
-    is_fallback = (model_id != "gpt-5.3-codex")
+    is_fallback = (model_id not in ("gpt-5.3-codex", "gpt-5.6"))
     log_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
     state_manager.add_debug_log(f"[{log_prefix} Normal] Starting generation.")
-    thought_status.update(label=_thinking_label(is_special_mode, is_fallback), state="running", expanded=False)
+    thought_status.update(label=_thinking_label(is_special_mode, is_fallback, model_id), state="running", expanded=False)
 
     full_response = ""
     full_thought_log = ""
     latest_usage = None
     final_grounding = None
+
+    is_reasoning = model_id and ("5.6" in model_id or "o1" in model_id or "o3" in model_id)
+    passed_effort = effort if is_reasoning else None
 
     for chunk in stream_response(
         runtime=runtime,
@@ -52,6 +55,7 @@ def run_normal_generation(
         instructions=context.system_instruction,
         max_output_tokens=max_output_tokens,
         temperature=0.7 if effort == "low" else 0.3,
+        reasoning_effort=passed_effort,
         search_enabled=search_enabled,
     ):
         if chunk.usage_metadata:

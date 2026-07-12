@@ -168,6 +168,7 @@ def _build_request_kwargs(
     response_schema: dict[str, Any] | None,
     structured_output_name: str | None,
     stream: bool,
+    reasoning_effort: str | None = None,
 ) -> dict[str, object]:
     request_kwargs: dict[str, object] = {
         "model": runtime.deployment,
@@ -176,8 +177,10 @@ def _build_request_kwargs(
         "max_output_tokens": max_output_tokens,
         "stream": stream,
     }
-    if temperature is not None:
+    if temperature is not None and reasoning_effort is None:
         request_kwargs["temperature"] = temperature
+    if reasoning_effort is not None:
+        request_kwargs["extra_body"] = {"reasoning": {"effort": reasoning_effort}}
     text_format = _build_text_format(
         response_mime_type=response_mime_type,
         response_schema=response_schema,
@@ -194,8 +197,14 @@ def _build_request_kwargs(
 
 def _build_client(runtime: AzureRuntime):
     from openai import OpenAI
+    import httpx
 
-    return OpenAI(api_key=runtime.api_key, base_url=runtime.base_url)
+    # 推論モデル（o1, o3, 5.6等）が長時間思考できるようにタイムアウトを大幅に延長 (60分)
+    return OpenAI(
+        api_key=runtime.api_key, 
+        base_url=runtime.base_url, 
+        timeout=httpx.Timeout(3600.0, connect=60.0)
+    )
 
 
 def generate_response(
@@ -209,6 +218,7 @@ def generate_response(
     response_mime_type: str | None = None,
     response_schema: dict[str, Any] | None = None,
     structured_output_name: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> AzureRouterResult:
     client = _build_client(runtime)
     request_kwargs = _build_request_kwargs(
@@ -222,6 +232,7 @@ def generate_response(
         response_schema=response_schema,
         structured_output_name=structured_output_name,
         stream=False,
+        reasoning_effort=reasoning_effort,
     )
     response = client.responses.create(**request_kwargs)
     return AzureRouterResult(
@@ -243,6 +254,7 @@ def stream_response(
     response_mime_type: str | None = None,
     response_schema: dict[str, Any] | None = None,
     structured_output_name: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> Iterator[AzureStreamChunk]:
     client = _build_client(runtime)
     request_kwargs = _build_request_kwargs(
@@ -256,9 +268,10 @@ def stream_response(
         response_schema=response_schema,
         structured_output_name=structured_output_name,
         stream=True,
+        reasoning_effort=reasoning_effort,
     )
-    stream = client.responses.create(**request_kwargs)
-    for event in stream:
+    response_stream = client.responses.create(**request_kwargs)
+    for event in response_stream:
         event_type = _get_attr(event, "type", "")
         if event_type == "response.output_text.delta":
             delta = _get_attr(event, "delta", "") or ""
