@@ -394,7 +394,7 @@ def run_chatbot_app():
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
-    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.5-flash"))
+    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.6-flash"))
     azure_rt = azure_runtime.load_azure_runtime_from_env(
         bootstrap_env_path=selected_env_file,
         logger=state_manager.add_debug_log,

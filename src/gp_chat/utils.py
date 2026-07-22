@@ -407,7 +407,7 @@ def generate_chat_title(messages, client_or_llm_clients, model_id=None):
     """
     try:
         # タイトル生成は高速・軽量なモデルに固定する
-        resolved_model_id = "gemini-3.1-flash-lite"
+        resolved_model_id = "gemini-3.5-flash-lite"
         llm_clients = llm_router.coerce_llm_clients(client_or_llm_clients)
         conversation_text = ""
         for m in messages:

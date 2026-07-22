@@ -61,7 +61,7 @@ SESSION_STATE_DEFAULTS = {
     "canvas_key_counter": 0,
     "reasoning_effort": "high",
     "debug_logs": [],
-    "current_model_id": "gemini-3.5-flash", # UIで切り替え可能にする
+    "current_model_id": "gemini-3.6-flash", # UIで切り替え可能にする
     "enable_google_search": True, # Grounding機能用フラグ
     "enable_more_research": False, # 深掘り調査モード用フラグ
     "uploaded_file_queue": [], # 送信待ちのファイルリスト
@@ -74,11 +74,10 @@ SESSION_STATE_DEFAULTS = {
 
 # 選択可能なモデルリスト
 AVAILABLE_MODELS = [
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.1-pro-preview",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-2.0-flash-exp",
+    "gemini-3.5-flash-lite",
     "gpt-5.3-codex",
     "gpt-5.6",
 ]
