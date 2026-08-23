@@ -695,3 +695,29 @@ def build_materialized_chat_context(
         file_attachments_meta,
         retry_context_snapshot,
     )
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """指定されたテキストをクリップボードにコピーする (Windows pywin32 / CF_UNICODETEXT)。
+
+    Args:
+        text: クリップボードに格納する文字列。
+
+    Returns:
+        bool: コピーに成功した場合 True、失敗した場合 False。
+    """
+    if not text:
+        return False
+    try:
+        import win32clipboard
+        import win32con
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, str(text))
+        finally:
+            win32clipboard.CloseClipboard()
+        return True
+    except Exception as e:
+        state_manager.add_debug_log(f"Clipboard copy failed: {e}", "warning")
+        return False

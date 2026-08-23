@@ -394,7 +394,7 @@ def run_chatbot_app():
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
-    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.6-flash"))
+    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.7-flash"))
     azure_rt = azure_runtime.load_azure_runtime_from_env(
         bootstrap_env_path=selected_env_file,
         logger=state_manager.add_debug_log,
@@ -688,42 +688,51 @@ def run_chatbot_app():
                     with st.expander("🔎 検索ソース (Grounding)"):
                         st.json(msg["grounding_metadata"])
 
-                if msg["role"] == "assistant" and "usage" in msg:
-                    u = msg["usage"]
-                    in_p = (u['input_tokens'] / INPUT_LIMIT) * 100
-                    out_p = (u['output_tokens'] / OUTPUT_LIMIT) * 100
-                    
-                    st.caption(
-                        f"📊 **トークン使用量詳細**\n\n"
-                        f"📥 **Input (Context):** {u['input_tokens']:,} / {INPUT_LIMIT:,} ({in_p:.2f}%)\n"
-                        f"📤 **Output (Response):** {u['output_tokens']:,} / {OUTPUT_LIMIT:,} ({out_p:.2f}%)"
-                    )
-                    
-                    # 生成中でない場合のみボタンを表示
-                    extra_usage_lines = []
-                    if u.get("llm_route"):
-                        extra_usage_lines.append(
-                            f"Route: {u['llm_route']} (retry={u.get('llm_retry_count', 0)})"
+                if msg["role"] == "assistant":
+                    if "usage" in msg:
+                        u = msg["usage"]
+                        in_p = (u['input_tokens'] / INPUT_LIMIT) * 100
+                        out_p = (u['output_tokens'] / OUTPUT_LIMIT) * 100
+                        
+                        st.caption(
+                            f"📊 **トークン使用量詳細**\n\n"
+                            f"📥 **Input (Context):** {u['input_tokens']:,} / {INPUT_LIMIT:,} ({in_p:.2f}%)\n"
+                            f"📤 **Output (Response):** {u['output_tokens']:,} / {OUTPUT_LIMIT:,} ({out_p:.2f}%)"
                         )
-                    if u.get("traffic_type") is not None:
-                        extra_usage_lines.append(
-                            f"Traffic Type: {u['traffic_type']}"
-                        )
-                    if u.get("thoughts_tokens"):
-                        extra_usage_lines.append(
-                            f"Thoughts Tokens: {u['thoughts_tokens']:,}"
-                        )
-                    if u.get("cached_tokens"):
-                        extra_usage_lines.append(
-                            f"Cached Tokens: {u['cached_tokens']:,}"
-                        )
-                    if extra_usage_lines:
-                        st.caption("\n".join(extra_usage_lines))
+                        
+                        # 生成中でない場合のみボタンを表示
+                        extra_usage_lines = []
+                        if u.get("llm_route"):
+                            extra_usage_lines.append(
+                                f"Route: {u['llm_route']} (retry={u.get('llm_retry_count', 0)})"
+                            )
+                        if u.get("traffic_type") is not None:
+                            extra_usage_lines.append(
+                                f"Traffic Type: {u['traffic_type']}"
+                            )
+                        if u.get("thoughts_tokens"):
+                            extra_usage_lines.append(
+                                f"Thoughts Tokens: {u['thoughts_tokens']:,}"
+                            )
+                        if u.get("cached_tokens"):
+                            extra_usage_lines.append(
+                                f"Cached Tokens: {u['cached_tokens']:,}"
+                            )
+                        if extra_usage_lines:
+                            st.caption("\n".join(extra_usage_lines))
 
                     if not st.session_state.get('is_generating', False):
-                        if st.button("✂️ この会話から分岐", key=f"branch_btn_{i}", help="この回答までの履歴で新しいチャットを生成・保存します"):
-                            handle_branching(i)
-                            st.rerun()
+                        c_copy, c_branch = st.columns([1, 1])
+                        with c_copy:
+                            if st.button("📋 Markdownをコピー", key=f"copy_md_{i}", help="この返答をMarkdown形式でクリップボードにコピーします"):
+                                if utils.copy_to_clipboard(msg.get("content", "")):
+                                    st.toast("📋 クリップボードにMarkdownをコピーしました", icon="✅")
+                                else:
+                                    st.error("クリップボードへのコピーに失敗しました")
+                        with c_branch:
+                            if st.button("✂️ この会話から分岐", key=f"branch_btn_{i}", help="この回答までの履歴で新しいチャットを生成・保存します"):
+                                handle_branching(i)
+                                st.rerun()
 
     if st.session_state['total_usage']['total_tokens'] > 0:
         st.divider()
