@@ -714,6 +714,8 @@ graph LR
 ## 第13章: 改訂履歴 (Revision History)
 
 * **2026-09-05**
+  * `install.bat` の改善: ユーザー環境での `.whl` 上書きインストール時に依存パッケージを `pyproject.toml`（.whl 内の METADATA）通りに自動更新できるよう、`pip install` コマンドに `--upgrade` オプションを追加。
+* **2026-09-05**
   * `pyproject.toml` の依存定義更新: `google-genai` を最新の `2.22.0`（Gemini 3.8 Flash対応・遅延インポート高速化）に更新。それに伴い、依存要件を満たすよう `google-auth` を `google-auth>=2.56.0, <3.0.0` に緩和・更新（仮想環境には最新 2.57.1 が適合）。
 * **2026-09-05**
   * `pyproject.toml` の依存定義修正: OpenAI Python SDK 3.0.0（HTTPX2移行）による破壊的変更からシステムを保護するため、依存定義を `openai>=2.45.0, <3.0.0` に厳格化。

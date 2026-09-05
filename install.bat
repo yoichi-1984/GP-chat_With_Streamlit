@@ -42,7 +42,7 @@ echo Installing latest .whl files...
 if exist _filter_whl.py (
     FOR /F "usebackq tokens=*" %%f IN (`python _filter_whl.py`) DO (
         echo  - Installing %%f
-        python -m pip install "%%f"
+        python -m pip install --upgrade "%%f"
     )
     del _filter_whl.py
 )
