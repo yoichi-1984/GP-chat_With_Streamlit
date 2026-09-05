@@ -30,8 +30,8 @@ GP-Chat は、単一のAIモデルや単純なチャットUIの制約を克服�
 
 ### 1.2 コア設計原則 (Core Architecture Principles)
 1. **ハイブリッド＆ゼロダウンタイム (Hybrid & Zero Downtime)**:
-   - GCP Vertex AI (Gemini) を主系とし、API レートリミット（429）や障害発生時には即座に Azure OpenAI へ自動フォールバックする。
-   - 特定のコーディングモデル（`gpt-5.3-codex`, `gpt-5.6`）は最初から Azure への直接接続（GCPバイパス）を行い、最適なモデル適材適所を実現する。
+   - GCP Vertex AI (最新フラッグシップ `gemini-3.8-flash` を主軸) を主系とし、API レートリミット（429）や障害発生時には即座に Azure OpenAI へ自動フォールバックする。
+   - 特定のモデル群（`gpt-5.3-codex`, `gpt-5.6`, `gpt-6`）は最初から Azure への直接接続（GCPバイパス）を行い、最適なモデル適材適所を実現する。
 2. **決定論的 UI 制御 & 厳格な排他ロック (Deterministic UI & Mutual Exclusion)**:
    - Streamlit の再実行（Rerun）モデルにおいて、競合するモード（例: 徹底調査とDeep Reasoning、PDFレポートとPPTXレポート）の同時選択をサイドバーの真理値マトリクスで完全に排他・連動ロックする。
 3. **自己修復ループの標準化 (Self-Healing by Default)**:
@@ -40,6 +40,8 @@ GP-Chat は、単一のAIモデルや単純なチャットUIの制約を克服�
    - ファイルアップロード処理において、`temp_workspace/<Session-UUID>/` への隔離保存とファイルポインタ位置の保護（`seek(0)` / `tell()`）を徹底し、再実行時のデータ破損を防止する。
 5. **完全な履歴可逆性 (History Reversibility & Branching)**:
    - 会話の任意の時点から分岐（Fork）して新しいチャットスレッドを開始できるツリー型対話を可能にし、試行錯誤の巻き戻しを完全に保証する。
+6. **HTTP/2 多重化 & 適応型ハイブリッド推論 (HTTP/2 Multiplexing & Adaptive Reasoning)**:
+   - Azure OpenAI の最新推論モデル（`gpt-5.6`, `gpt-6`）を高推論モード（`high`/`deep`）で実行する際、OpenAI SDK v3.x の新通信基盤 `httpx2`（HTTP/2 多重化）によりサブタスクを並行実行し、プロキシ/APIM の無通信タイムアウト（504 Gateway Timeout）を完全に回避しつつ、思考プロセスを逐次ストリーミング描画する。
 
 ---
 
@@ -100,7 +102,8 @@ gp-chat/
         ├── azure_common_types.py # Azure共通データ型定義
         ├── azure_history_utils.py # Azure用履歴変換ユーティリティ
         ├── azure_normal_chat.py # Azure用通常チャットハンドラ
-        ├── azure_responses_router.py # Azure用レスポンスルーティング
+        ├── azure_responses_router.py # Azure用レスポンスルーティング (httpx2 HTTP/2 対応)
+        ├── azure_deep_orchestrator.py # GPT-5.6/6 専用 HTTPX2並行ハイブリッドオーケストレーター
         ├── azure_code_agent.py # Azure用コード実行・修復エージェント
         ├── azure_reasoning_agent.py # Azure用Deep Reasoningエージェント
         ├── azure_research_agent.py # Azure用徹底調査エージェント
@@ -116,31 +119,36 @@ gp-chat/
   - `run() -> None`: `sys.argv` を `["streamlit", "run", str(main_path)]` に再構築し、`streamlit.web.cli.main()` を呼び出してアプリを起動する。
 
 #### ② `src/gp_chat/main.py`
-- **責務**: アプリケーションのメインライフサイクル管理、UIレイアウト描画、チャット入力受付、ストリーミング応答制御、モデル別ルーティング分岐、Azure Fallback スーパーバイズ。
+- **責務**: アプリケーションのメインライフサイクル管理、UIレイアウト描画、チャット入力受付、ストリーミング応答制御、モデル別ルーティング分岐、Azure Fallback スーパーバイズ、思考ログ折りたたみ描画。
 - **主要関数**:
   - `_resolve_mode_name(*, is_special_mode: bool, is_more_research: bool, is_deep_reasoning: bool, is_report_mode: bool) -> str`: 現在のUI状態から実行すべきモード識別名（`"report"`, `"research"`, `"reasoning"`, `"special"`, `"normal"`）を判定して返す。
   - `_run_azure_mode(...) -> AzureModeResult`: Azure OpenAI を使用して各種モード（Normal, Reasoning, Research, Report, Code）を実行する統合ディスパッチャ。
-  - `main() -> None`: 初期セッション構築、メールアドレス入力ガード、システムプロンプト設定画面、サイドバー描画、履歴メッセージ描画、ユーザー入力処理、AI応答ストリーミング、Cloud Logging 送信、自動保存までを一括制御。
+  - `main() -> None`: 初期セッション構築、メールアドレス入力ガード、システムプロンプト設定画面、サイドバー描画、履歴メッセージ描画（`thought_log` のアコーディオン表示含む）、ユーザー入力処理、AI応答ストリーミング、Cloud Logging 送信、自動保存までを一括制御。
 
 #### ③ `src/gp_chat/sidebar.py`
 - **責務**: サイドバーUIコンポーネントの描画と設定変更ハンドリング、排他制御マトリクスの適用、Canvasエディタ描画、履歴JSONのロード/リセット。
 - **主要関数**:
   - `render_sidebar(data_manager_instance) -> dict`: サイドバー全体を描画し、選択された設定値の辞書を返す。
   - `_render_environment_selector() -> None`: `env/` 配下の `.env` ファイル一覧を取得し、セレクトボックスを描画。
-  - `_render_model_selector() -> None`: 利用可能なモデル一覧を描画し、選択値をセッションに同期。
-  - `_render_thinking_level_selector(is_locked: bool) -> None`: `low` / `high` / `deep` の選択ラジオボタンを描画。
+  - `_render_model_selector() -> None`: 利用可能なモデル一覧（Gemini 3.8 Flash, GPT-6 等を含む9モデル）を描画し、選択値をセッションに同期。
+  - `_render_thinking_level_selector(is_locked: bool) -> None`: `high` / `medium` / `low` / `deep` の推論レベル選択セレクトボックスを描画。
   - `_render_canvas_section(data_manager_instance) -> None`: 最大40スロットの Ace Editor、トグルボタン、Pylint検証ボタン、レビューボタンを描画。
   - `_render_history_section() -> None`: 過去の `chat_log/*.json` 一覧からの選択ロード、JSONファイルアップロード、および会話リセットボタンを描画。
 
 #### ④ `src/gp_chat/config.py`
-- **責務**: アプリケーション全体の定数定義、デフォルトセッションステート、UI文言定義。
+- **責務**: アプリケーション全体の定数定義、デフォルトセッションステート、UI文言定義、オーケストレーター設定。
 - **主要定数・クラス**:
   - `MAX_CANVASES = 40`: 最大Canvasスロット数。
   - `EXECUTION_TIMEOUT = 30`: Pythonコード実行タイムアウト（秒）。
   - `LLM_RETRYABLE_STATUS_CODES = (408, 429, 500, 502, 503, 504)`: リトライ対象ステータスコード。
   - `PRIORITY_APP_RETRY_COUNT = 3`, `PRIORITY_APP_RETRY_WAIT_SECONDS = (2.0, 4.0, 8.0)`: リトライ設定。
-  - `AVAILABLE_MODELS`: 選択可能なモデルIDのリスト。
-  - `SESSION_STATE_DEFAULTS`: 初期 `st.session_state` 辞書。
+  - `AVAILABLE_MODELS`: 選択可能な全9モデルのリスト（`"gemini-3.8-flash"`, `"gemini-3.7-flash"`, `"gemini-3.6-flash"`, `"gemini-3.5-flash"`, `"gemini-3.1-pro-preview"`, `"gemini-3.5-flash-lite"`, `"gpt-5.3-codex"`, `"gpt-5.6"`, `"gpt-6"`）。
+  - `AZURE_DIRECT_MODELS`: Azure OpenAI へ直接ルーティング（GCPバイパス）するモデルタプル（`("gpt-5.3-codex", "gpt-5.6", "gpt-6")`）。
+  - `SESSION_STATE_DEFAULTS`: 初期 `st.session_state` 辞書（`current_model_id` のデフォルトは `"gemini-3.8-flash"`, `reasoning_effort` は `"high"`）。
+  - `AZURE_DEEP_MAX_CONCURRENCY`: GPT-5.6 / GPT-6 並行サブタスクの最大同時実行数（環境変数 `AZURE_DEEP_MAX_CONCURRENCY`、デフォルト 3）。
+  - `AZURE_DEEP_PLANNER_PROMPT`: タスク分解・実行計画立案用システムプロンプト。
+  - `AZURE_DEEP_PLANNER_SCHEMA`: タスク分解出力用 JSON スキーマ（`needs_parallel_subtasks`, `plan_summary`, `subtasks`）。
+  - `AZURE_DEEP_SUBTASK_PROMPT`: 並行サブタスク実行用システムプロンプト。
   - `class UITexts`: UI上に表示する全静的テキストを管理するクラス。
 
 #### ⑤ `src/gp_chat/utils.py`
@@ -220,16 +228,59 @@ gp-chat/
   - `_detect_bounding_box_and_crop(...)`: Gemini でバウンディングボックス相対座標（`CropAreaSchema`）を検出し、Pillow で物理トリミング。
   - `_render_slide_to_pptx(...)`: `python-pptx` を使用して `format.pptx` のプレースホルダーに流し込み描画（全30種以上の描画パーツ関数）。
 
-#### ⑮ `src/gp_chat/azure_*.py` (Azure 専用モジュール群)
-- **`azure_runtime.py`**: Azure OpenAI クライアント初期化とデプロイメント名管理。
-- **`azure_context_builder.py`**: Gemini 形式コンテキストを Azure API 形式へ変換（画像 Base64 化、PDF 非対応例外スロー）。
-- **`azure_supervisor_helpers.py`**: GCP のエラー状態やログを検査し、Azure へのフォールバック要否を判定。
-- **`azure_fault_injection.py`**: `dev/fault_injection.local.toml` から疑似エラー設定をロードし、テスト用の 429 例外を注入。
-- **`azure_common_types.py`**: `AzureModeResult`, `AzureUsageMetadata` などの共通データ型定義。
-- **`azure_normal_chat.py`**: Azure を用いた通常チャットストリーミング。
-- **`azure_reasoning_agent.py` / `azure_research_agent.py` / `azure_report_agent.py` / `azure_code_agent.py`**: 主系に対応する Azure 側の特化型エージェント実装。
+#### ⑮ `src/gp_chat/azure_runtime.py`
+- **責務**: Azure OpenAI API クライアント初期化パラメータの管理、環境変数（`.env` および `AZURE_OPENAI_ENV_FILE`）の解決、Codex / GPT-5.6 / GPT-6 専用デプロイメント名のマッピング。
+- **主要関数・クラス**:
+  - `class AzureRuntime`: `endpoint`, `api_key`, `deployment`, `base_url`, `codex_deployment`, `sol_deployment`, `gpt6_deployment` を保持するイミュータブルデータクラス。
+  - `load_azure_runtime_from_env(...) -> AzureRuntime | None`: 環境変数または外部環境設定ファイルから認証情報と各デプロイ名をロードして検証。
+  - `is_azure_runtime_available(runtime) -> bool`: エンドポイント・APIキー・デプロイ名が正しく設定されているかを検証。
 
-#### ⑯ `src/gp_chat/cloud_logging_utils.py`
+#### ⑯ `src/gp_chat/azure_responses_router.py`
+- **責務**: OpenAI Python SDK v3.x による Azure OpenAI API への通信統括。同期通信（httpx）および HTTP/2 多重化非同期通信（httpx2）の二重化、ストリーミングイベントの正規化パース。
+- **主要関数**:
+  - `_build_client(runtime: AzureRuntime) -> OpenAI`: 同期クライアント生成（推論モデルの長時間思考に耐えうるタイムアウト3600秒設定）。
+  - `_build_async_client(runtime: AzureRuntime) -> AsyncOpenAI`: `httpx2.AsyncClient(http2=True, timeout=httpx2.Timeout(3600.0, connect=60.0))` による HTTP/2 多重化非同期クライアント生成。
+  - `generate_response(...) -> AzureRouterResult`: 同期的な一括レスポンス生成。
+  - `stream_response(...) -> Iterator[AzureStreamChunk]`: 同期的なイベントストリーミング（思考デルタ `thought_delta`、本文デルタ `text_delta`、Usage、Groundingメタデータを逐次送出）。
+  - `async_generate_response(...) -> AzureRouterResult`: 非同期的な一括レスポンス生成（オーケストレーターの Phase 1 および Phase 2 で使用）。
+  - `async_stream_response(...) -> AsyncIterator[AzureStreamChunk]`: 非同期的なイベントストリーミング（オーケストレーターの Phase 3 で使用）。
+
+#### ⑰ `src/gp_chat/azure_deep_orchestrator.py`
+- **責務**: GPT-5.6 / GPT-6 専用 HTTPX2並行・細切れハイブリッドオーケストレーター。重推論時の APIM / プロキシタイムアウト（504）を回避し、HTTP/2 多重化による並行情報収集とリアルタイム思考ストリーミングを実現。
+- **主要関数**:
+  - `run_orchestrated_generation(...) -> AzureModeResult`: Streamlit 同期ワーカーから呼び出される公開エントリポイント。`_run_coroutine` を介して非同期処理を実行。
+  - `_run_async_orchestrated_generation(...) -> AzureModeResult`: 3フェーズパイプラインの実行本体。
+    - **Phase 1 (Planner)**: `reasoning_effort="low"` でタスクを独立した並行サブタスクに分解（`needs_parallel_subtasks=False` またはパース失敗時は Phase 3 へ Early Exit）。
+    - **Phase 2 (HTTP/2 Multiplexing)**: `asyncio.Semaphore(AZURE_DEEP_MAX_CONCURRENCY)`（デフォルト 3）で並行数を制限しつつ、単一 TCP 接続上で `httpx2` によりサブタスクを並行実行し、材料を高速回収。
+    - **Phase 3 (Synthesizer)**: 収集材料を統合し、`reasoning_effort=effort` で思考推論（`thought_delta`）および本文を逐次ストリーミング描画。
+  - `_safe_json_loads(raw_text: str) -> dict[str, Any]`: Markdown コードブロック（```json）や前後のテキストを自動除去して JSON を堅牢にパース。
+  - `_run_coroutine(coro)`: 既存のイベントループが稼働中の場合は `ThreadPoolExecutor`、非稼働時は `asyncio.run` で実行する安全な同期/非同期ブリッジ。
+
+#### ⑱ `src/gp_chat/azure_normal_chat.py`
+- **責務**: Azure OpenAI を用いた通常チャットおよび Special モードのストリーミング応答制御、推論モデル・高推論時のオーケストレーターディスパッチ。
+- **主要関数**:
+  - `run_normal_generation(...) -> AzureModeResult`: 通常チャットの生成処理。`model_id` が `5.6` または `6` を含み、かつ `effort in ("high", "deep")` かつ通常モードの場合に、`azure_deep_orchestrator.run_orchestrated_generation` へ自動ディスパッチ。それ以外は `stream_response` でストリーミング実行。
+  - `run_special_generation(...) -> AzureModeResult`: Special モード（Canvas コード検証・リファクタリング）のストリーミング実行。
+
+#### ⑲ `src/gp_chat/azure_context_builder.py`
+- **責務**: Gemini 形式のコンテキストオブジェクトから Azure OpenAI API 形式（`messages` リスト、Base64 画像、システム指示文）への変換。PDF 添付時は Azure 未対応として `AzureContextBuildError` を送出。
+
+#### ⑳ `src/gp_chat/azure_supervisor_helpers.py`
+- **責務**: GCP 側のエラー（レートリミット 429 や 5xx、クォータ超過）を検査し、Azure OpenAI へのフォールバック要否を判定。
+
+#### ㉑ `src/gp_chat/azure_fault_injection.py`
+- **責務**: `dev/fault_injection.local.toml` から疑似エラー設定をロードし、テスト・検証用の擬似的な終端 429 例外を注入。
+
+#### ㉒ `src/gp_chat/azure_common_types.py`
+- **責務**: Azure 関連モジュール間で共有されるデータクラス群の定義（`AzureModeResult`, `AzureUsageMetadata`, `AzureStreamChunk`, `AzureRouterResult`, `AzureMaterializedContext`）。
+
+#### ㉓ `src/gp_chat/azure_history_utils.py`
+- **責務**: 会話履歴メッセージから Azure 呼び出し用の辞書形式リストへの変換ユーティリティ。
+
+#### ㉔ `src/gp_chat/azure_reasoning_agent.py` / `azure_research_agent.py` / `azure_report_agent.py` / `azure_code_agent.py`
+- **責務**: 主系（Gemini）に対応する Azure 側の特化型自律エージェント群（Deep Reasoning、徹底調査、HTML/PDFレポート生成、コード実行監視＆自己修復）。
+
+#### ㉕ `src/gp_chat/cloud_logging_utils.py`
 - **責務**: Google Cloud Logging への監査ログ送信。
 - **主要関数**:
   - `send_cloud_log(user_email: str, model_id: str, prompt_text: str, response_text: str, usage_metadata: dict, ...) -> None`: GCP Cloud Logging に構造化ログを非同期送信。Azure 直接接続時やフォールバック時は 403 エラー防止のため自動スキップ。
@@ -301,50 +352,107 @@ class PresentationDSLSchema(pydantic.BaseModel):
 ### 3.2 Azure 共通データ型 (`azure_common_types.py`)
 
 ```python
+from __future__ import annotations
+import copy
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 @dataclass
 class AzureUsageMetadata:
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
+    prompt_token_count: int = 0
+    candidates_token_count: int = 0
+    total_token_count: int = 0
+    thoughts_token_count: int = 0
+    cached_content_token_count: int = 0
+    traffic_type: str | None = None
 
 @dataclass
 class AzureStreamChunk:
-    text: str = ""
-    is_final: bool = False
-    usage: Optional[AzureUsageMetadata] = None
+    text_delta: str = ""
+    thought_delta: str = ""
+    usage_metadata: AzureUsageMetadata | None = None
+    grounding_metadata: dict[str, object] | None = None
+    route: str = "azure_fallback"
+    app_retry_count: int = 0
+    sdk_http_headers: dict[str, str] | None = None
+    provider: str = "azure"
 
 @dataclass
 class AzureRouterResult:
-    response_text: str = ""
-    usage_metadata: Optional[AzureUsageMetadata] = None
-    finish_reason: str = "stop"
-    raw_response: Any = None
+    text: str = ""
+    usage_metadata: AzureUsageMetadata | None = None
+    grounding_metadata: dict[str, object] | None = None
+    route: str = "azure_fallback"
+    app_retry_count: int = 0
+    sdk_http_headers: dict[str, str] | None = None
+    provider: str = "azure"
+    response: Any = None
 
 @dataclass
 class AzureMaterializedContext:
-    messages: List[Dict[str, Any]] = field(default_factory=list)
-    system_instruction: str = ""
-    has_image: bool = False
-    has_unsupported_pdf: bool = False
+    messages: list[dict[str, object]]
+    system_instruction: str
+    available_files_map: dict[str, str] = field(default_factory=dict)
+    file_attachments_meta: list[dict[str, object]] = field(default_factory=list)
+    retry_context_snapshot: list[dict[str, object]] = field(default_factory=list)
+
+    def clone_retry_context(self) -> list[dict[str, object]]:
+        return copy.deepcopy(self.retry_context_snapshot)
 
 @dataclass
 class AzureModeResult:
-    mode_name: str
-    output_text: str
-    usage_metadata: Optional[AzureUsageMetadata] = None
-    artifacts: Dict[str, Any] = field(default_factory=dict)
-    debug_logs: List[Dict[str, Any]] = field(default_factory=list)
+    full_response: str = ""
+    thought_log: str = ""
+    system_instruction: str = ""
+    usage_metadata: AzureUsageMetadata | None = None
+    grounding_metadata: dict[str, object] | None = None
+    mode_meta: dict[str, object] = field(default_factory=dict)
+    available_files_map: dict[str, str] = field(default_factory=dict)
+    file_attachments_meta: list[dict[str, object]] = field(default_factory=list)
+    retry_context_snapshot: list[dict[str, object]] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
 ```
 
-### 3.3 会話履歴 JSON スキーマ (`chat_log/*.json`)
+### 3.3 GPT-5.6 / GPT-6 並行タスク分解スキーマ (`config.py`)
+
+```python
+AZURE_DEEP_PLANNER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "needs_parallel_subtasks": {
+            "type": "boolean",
+            "description": "Whether parallel subtask execution is needed."
+        },
+        "plan_summary": {
+            "type": "string",
+            "description": "Brief summary of the overall execution approach."
+        },
+        "subtasks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "description": {"type": "string"},
+                    "query": {"type": "string"}
+                },
+                "required": ["id", "description", "query"],
+                "additionalProperties": False
+            },
+            "description": "List of independent subtasks to run in parallel."
+        }
+    },
+    "required": ["needs_parallel_subtasks", "plan_summary", "subtasks"],
+    "additionalProperties": False
+}
+```
+
+### 3.4 会話履歴 JSON スキーマ (`chat_log/*.json`)
 
 ```json
 {
   "system_role": "You are Gemini, a helpful and versatile AI assistant...",
-  "current_model_id": "gemini-3.7-flash",
+  "current_model_id": "gemini-3.8-flash",
   "reasoning_effort": "high",
   "enable_google_search": true,
   "enable_more_research": false,
@@ -359,12 +467,13 @@ class AzureModeResult:
   "messages": [
     {
       "role": "user",
-      "content": "こんにちは。自己紹介をお願いします。"
+      "content": "最新のAIアーキテクチャについて教えてください。"
     },
     {
       "role": "assistant",
-      "content": "こんにちは！私はGP-Chatです...",
-      "model_info": "gemini-3.7-flash",
+      "content": "GP-Chatの最新アーキテクチャでは...",
+      "model_info": "gemini-3.8-flash",
+      "thought_log": "### 📋 実行計画 (Phase 1: Task Breakdown)\n...\n### ⚡ サブタスク収集結果 (Phase 2)\n...\n### 🧠 思考推論 & 統合回答生成 (Phase 3)\n...",
       "usage_metadata": {
         "prompt_token_count": 120,
         "candidates_token_count": 350,
@@ -391,9 +500,9 @@ class AzureModeResult:
 
 | 変数名 | 型 | デフォルト値 | 変更契機 | 参照・利用モジュール |
 | :--- | :---: | :--- | :--- | :--- |
-| `messages` | `list[dict]` | `[]` | ユーザー送信、AIストリーミング完了、会話分岐 | `main.py`, `state_manager.py`, 全エージェント |
+| `messages` | `list[dict]` | `[]` | ユーザー送信、AIストリーミング完了、会話分岐 (※assistantメッセージ内に `thought_log` を永続化) | `main.py`, `state_manager.py`, 全エージェント |
 | `system_role_defined` | `bool` | `False` | 初回プロンプト確定ボタン押下 | `main.py`, `sidebar.py` |
-| `current_model_id` | `str` | `gemini-3.7-flash` | サイドバーのモデル選択セレクトボックス | `main.py`, `sidebar.py`, `llm_router.py` |
+| `current_model_id` | `str` | `gemini-3.8-flash` | サイドバーのモデル選択セレクトボックス | `main.py`, `sidebar.py`, `llm_router.py` |
 | `reasoning_effort` | `str` | `high` | サイドバーの推論レベルラジオボタン | `main.py`, `reasoning_agent.py` |
 | `enable_google_search` | `bool` | `True` | サイドバーの Web検索チェックボックス | `main.py`, `utils.py`, `research_agent.py` |
 | `enable_more_research` | `bool` | `False` | サイドバーの徹底調査トグル | `main.py`, `sidebar.py`, `research_agent.py` |
@@ -445,7 +554,7 @@ class AzureModeResult:
 
 | モード / 設定状態 | Thinking Level | Web検索 | 徹底調査 | レポート(pdf) | レポート(pptx) | auto_plot |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **通常対話** | 任意選択 (`low`/`high`/`deep`) | 任意 (ON/OFF) | 選択可 | 選択可 | 選択可 | 任意 (ON/OFF) |
+| **通常対話** | 任意選択 (`high`/`medium`/`low`/`deep`) | 任意 (ON/OFF) | 選択可 | 選択可 | 選択可 | 任意 (ON/OFF) |
 | **Thinking Level: deep** | `deep` (選択中) | 任意 (ON/OFF) | **ロック (選択不可)** | **ロック (選択不可)** | **ロック (選択不可)** | 任意 (ON/OFF) |
 | **徹底調査 (More Research) ON** | **`high` に固定 (ロック)** | **強制 ON (ロック)** | ON (選択中) | **ロック (選択不可)** | **ロック (選択不可)** | 任意 (ON/OFF) |
 | **レポート機能 (pdf) ON** | **`high` に固定 (ロック)** | 任意 (ON/OFF) | **ロック (選択不可)** | ON (選択中) | **ロック (選択不可)** | 任意 (ON/OFF) |
@@ -469,6 +578,16 @@ class AzureModeResult:
    - Windows API (`win32clipboard`, `win32con.CF_UNICODETEXT`) を介してUnicodeテキストをクリップボードに設定。
    - 成功時は `st.toast("📋 クリップボードにMarkdownをコピーしました", icon="✅")` をポップアップ表示。
    - 空文字または例外発生時はエラーハンドリングを行い、UIのクラッシュを防止。
+
+### 5.4 思考プロセスの折りたたみ永続化表示仕様 (`st.expander`)
+1. **目的**:
+   - 回答生成中のストリーミング一時領域（`st.status`）は、完了後の画面再描画（`st.rerun()`）によって消失する。
+   - 回答完了後もユーザーが「どのようなタスク分割が行われたか」「並行サブタスクでどんな材料が集まったか」「モデルがどう推論したか」をいつでも振り返れるよう、思考ログをアコーディオン形式で永続表示する。
+2. **データ永続化**:
+   - GCP 通常ルート、Deep Reasoning、徹底調査、および Azure オーケストレーターの全ルートにおいて、生成された全思考ログ文字列（`full_thought_log`）をアシスタントメッセージ辞書に `msg["thought_log"] = full_thought_log` として格納し、JSON 自動保存の対象とする。
+3. **UI レンダリング仕様**:
+   - チャット履歴描画ループにおいて、`msg["role"] == "assistant"` かつ `msg.get("thought_log")` が存在する場合、回答本文の上部に `st.expander("🧠 思考プロセス (Thinking Process)", expanded=False)` を描画。
+   - 初期状態は折りたたまれており、回答本文の視認性を妨げない。ユーザーがクリックした際のみ展開され、Phase 1〜3 の思考過程・サブタスク収集結果が Markdown 形式で表示される。
 
 ---
 
@@ -534,6 +653,8 @@ def calculate():
 
 ### 7.1 二重化クライアント制御フロー (`llm_router.py`)
 
+最新フラッグシップモデル `gemini-3.8-flash` をはじめとする GCP Vertex AI 呼び出しは、`google-genai==2.22.0`（遅延インポート高速化・安定通信）を基盤に、Standard / Priority の二重化クライアント制御と自動フォールバックを備えています。
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -571,6 +692,22 @@ sequenceDiagram
         end
     end
 ```
+
+### 7.2 Azure Direct ルーティング & GCPバイパス仕様 (`AZURE_DIRECT_MODELS`)
+
+GP-Chat は、GCP 上に存在しない特殊な機能・モデルを直接 Azure OpenAI へルーティングするバイパスアーキテクチャを備えています。
+
+1. **対象モデル群**:
+   - `config.AZURE_DIRECT_MODELS = ("gpt-5.3-codex", "gpt-5.6", "gpt-6")`
+2. **バイパス制御ロジック (`main.py`)**:
+   - ユーザーが選択した `model_id` が `AZURE_DIRECT_MODELS` に含まれる場合、GCP 側のクライアント初期化およびリクエスト試行を完全にスキップ。
+   - `azure_fault_injection.build_synthetic_terminal_429(mode_name)` を介して直接 `_run_azure_mode` へディスパッチ。
+3. **デプロイメント名の動的解決 (`azure_runtime.py`)**:
+   - `gpt-5.3-codex` ──▶ `AZURE_OPENAI_CODEX_DEPLOYMENT`（デフォルト: `deployment`）
+   - `gpt-5.6` ──▶ `AZURE_OPENAI_SOL_DEPLOYMENT`（`gpt-5.6-sol`）
+   - `gpt-6` ──▶ `AZURE_OPENAI_GPT6_DEPLOYMENT`（`gpt-6-astra`）
+4. **Cloud Logging の安全スキップ (`cloud_logging_utils.py`)**:
+   - Azure 直接接続時およびフォールバック時は、GCP リソースへの不要な書き込みや権限エラー（403 Forbidden）を避けるため、Cloud Logging 送信を自動抑止。
 
 ---
 
@@ -627,21 +764,110 @@ sequenceDiagram
 | :--- | :--- |
 | `azure_normal_chat.py` | 通常チャットストリーミングおよび Special モードストリーミング。対象推論モデル（`gpt-5.6`, `gpt-6`）かつ高推論時はオーケストレーターへディスパッチ。 |
 | `azure_deep_orchestrator.py` | 【新設】GPT-5.6 / GPT-6 専用 HTTPX2並行・細切れハイブリッドオーケストレーター。Phase 1（タスク分解）→ Phase 2（HTTP/2 多重化並行実行）→ Phase 3（思考ストリーミング統合推論）。 |
+| `azure_responses_router.py` | OpenAI Python SDK v3.x ベースの同期（httpx）/非同期（httpx2 HTTP/2 多重化）二重化クライアント・通信ルーター。 |
 | `azure_reasoning_agent.py` | Azure OpenAI を用いた 3 段階 Deep Reasoning パイプライン。 |
 | `azure_research_agent.py` | Azure OpenAI を用いた ReAct 型徹底調査ループ。 |
 | `azure_report_agent.py` | Azure OpenAI を用いた HTML プレゼン生成 & PDF 印刷。 |
 | `azure_code_agent.py` | Azure OpenAI を用いた Python コード自動実行 & 自己修復ループ。 |
 
-### 9.1 GPT-5.6 / GPT-6 専用ハイブリッド・オーケストレーター仕様 (`azure_deep_orchestrator.py`)
-1. **目的**: コンテキストが重い状態での高推論（`effort in ("high", "deep")`）におけるゲートウェイタイムアウト（504）を回避し、OpenAI Python SDK 3.x の新通信基盤 `httpx2`（HTTP/2 多重化）を最大限に活用。
-2. **Phase 1: タスク分解 (Planner)**:
-   - 選択中のモデル（`gpt-5.6` または `gpt-6`）を `reasoning_effort="low"` かつ JSON Schema で呼び出し、独立して並行処理可能なサブタスクに分解。
-   - `_safe_json_loads` により、モデル応答にマークダウンコードブロック（```json）や前後の解説文が含まれる場合でも確実に抽出しパース。短文・単一質問時やパース失敗時は Phase 3 へ Early Exit。
-3. **Phase 2: サブタスク並行実行 (HTTP/2 多重化)**:
-   - `asyncio.Semaphore(AZURE_DEEP_MAX_CONCURRENCY)`（デフォルト 3）で並行数を制御しながら、単一の TCP/TLS 接続上で `httpx2` による HTTP/2 多重化 API コールを同時に送信し高速回収。
-   - サブタスク失敗時はベストエフォート型としてログ記録（`state_manager.add_debug_log`）しつつ Phase 3 に引き継ぐ。
-4. **Phase 3: 思考ストリーミング & 統合推論 (Synthesizer)**:
-   - Phase 2 で収集された材料をコンテキストに統合し、高推論モード（`reasoning_effort=effort`）かつ `stream=True` で実行。思考ログ（reasoning delta）および応答テキストを Streamlit UI にリアルタイム逐次描画。
+### 9.1 GPT-5.6 / GPT-6 専用 HTTPX2並行・細切れハイブリッドオーケストレーター仕様 (`azure_deep_orchestrator.py`)
+
+#### 9.1.1 開発背景と解決課題 (Gateway Timeout 回避)
+1. **タイムアウト問題の根本原因**:
+   - Azure API Management (APIM) やリバースプロキシ環境では、アイドル通信タイムアウト（通常 120 秒〜240 秒）が設定されています。
+   - `gpt-5.6-sol` や `gpt-6-astra` などのフロンティア推論モデルをコンテキストが肥大化した状態で高推論モード（`reasoning_effort="high"` または `"deep"`）で実行すると、思考トークン生成が完了して最初の応答トークン（First Token）が返るまでに数分〜十数分を要し、中間プロキシによって `504 Gateway Timeout` で切断される障害が発生します。
+2. **解決アプローチ (HTTP/2 多重化並行分割 + 思考ストリーミング)**:
+   - OpenAI Python SDK v3.x の新トランスポート基盤である `httpx2`（HTTP/2 多重化）を採用。
+   - 重大な課題を軽量プロンプトで細切れの独立サブタスクに分解（Phase 1）。
+   - 単一 TCP コネクション上で HTTP/2 多重化ストリームを用いて並行して材料を高速収集（Phase 2）。
+   - 収集した材料を統合し、高推論モードで思考ログ（`response.reasoning_summary_text.delta`）をストリーミング送出しながら統合推論（Phase 3）。ストリーミングにより常にパケットが流れるため、プロキシの無通信タイムアウトが完全に回避されます。
+
+#### 9.1.2 厳格な発動条件マトリクス
+本ハイブリッド・オーケストレーターは、局所化原則に基づき、以下の**すべての条件**を満たす場合のみに限定して自動発動します。
+
+| 判定項目 | 発動条件 | 備考 |
+| :--- | :---: | :--- |
+| **対象モデル (`model_id`)** | `gpt-5.6` または `gpt-6` | `any(tok in model_id.lower() for tok in ("5.6", "6"))` |
+| **推論レベル (`effort`)** | `high` または `deep` | `effort in ("high", "deep")` |
+| **動作モード** | 通常チャットモード (`not is_special_mode`) | Specialモード、レポートモード、徹底調査等は除外 |
+
+※ `gpt-5.3-codex` や推論レベル `low` / `medium` 選択時、あるいは GCP 側の通常チャットでは本オーケストレーターは発動せず、既存の単一ストリーミングまたは各特化エージェントが動作します。
+
+#### 9.1.3 3層パイプラインの内部アルゴリズム詳細
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Streamlit UI (main.py)
+    participant Normal as azure_normal_chat.py
+    participant Orch as azure_deep_orchestrator.py
+    participant Router as azure_responses_router.py
+    participant Azure as Azure OpenAI (HTTP/2)
+
+    UI->>Normal: run_normal_generation (model=gpt-6, effort=high)
+    Normal->>Orch: run_orchestrated_generation
+    Note over Orch: _run_coroutine による非同期ブリッジ起動
+    
+    rect rgb(240, 248, 255)
+        Note over Orch: 【Phase 1: タスク分解 (Planner)】
+        Orch->>Router: async_generate_response (effort=low, JSON Schema)
+        Router->>Azure: Task Breakdown Request
+        Azure-->>Router: JSON Plan Result
+        Router-->>Orch: Plan Response
+        Note over Orch: _safe_json_loads によるマークダウン剥ぎ取りパース
+    end
+
+    alt needs_parallel_subtasks == True かつ subtasks 存在
+        rect rgb(255, 250, 240)
+            Note over Orch: 【Phase 2: サブタスク並行実行 (HTTP/2 多重化)】
+            Note over Orch: asyncio.Semaphore(AZURE_DEEP_MAX_CONCURRENCY=3)
+            par サブタスク 1〜N 並行実行
+                Orch->>Router: async_generate_response (sub_1, effort=low)
+                Router->>Azure: HTTP/2 Stream 1
+                and
+                Orch->>Router: async_generate_response (sub_2, effort=low)
+                Router->>Azure: HTTP/2 Stream 2
+            end
+            Azure-->>Router: サブタスク完了応答群
+            Router-->>Orch: 各サブタスク材料回収
+            Note over Orch: UI進捗更新 (k/N) & thought_log アコーディオン蓄積
+        end
+    else 単一質問 / Early Exit
+        Note over Orch: Phase 2 をスキップして直接 Phase 3 へ移行
+    end
+
+    rect rgb(245, 255, 245)
+        Note over Orch: 【Phase 3: 思考ストリーミング & 統合推論 (Synthesizer)】
+        Note over Orch: 収集材料を synthesis_instruction に統合
+        Orch->>Router: async_stream_response (effort=high/deep, stream=True)
+        loop 思考デルタ & 本文ストリーミング
+            Router->>Azure: Reasoning Stream
+            Azure-->>Router: thought_delta / text_delta
+            Router-->>Orch: Chunk
+            Orch-->>UI: 思考ログ & 本文リアルタイム描画 (504タイムアウト回避)
+        end
+    end
+    Orch-->>Normal: AzureModeResult (thought_log 保持)
+    Normal-->>UI: 応答完了 & thought_log をメッセージに永続化
+```
+
+1. **Phase 1: タスク分解 (Planner)**:
+   - 呼び出しパラメータ: `reasoning_effort="low"`, `temperature=0.2`, `max_output_tokens=4096`, `response_schema=AZURE_DEEP_PLANNER_SCHEMA`。
+   - `_safe_json_loads(raw_text)`: モデルが返答の先頭・末尾に ````json ... ```` のフェンス記号や解説文を付与した場合でも、最初の `{` から最後の `}` を正確にスライスしてパース。
+   - **Early Exit 条件**: `needs_parallel_subtasks` が `False`、`subtasks` が空リスト、またはパース例外時は、直ちに単一推論モードとして Phase 3 へ移行。
+2. **Phase 2: サブタスク並行実行 (HTTP/2 多重化)**:
+   - 多重化クライアント: `_build_async_client(runtime)` により `httpx2.AsyncClient(http2=True, timeout=httpx2.Timeout(3600.0, connect=60.0))` を生成。
+   - 同時実行制御: `asyncio.Semaphore(AZURE_DEEP_MAX_CONCURRENCY)`（デフォルト 3、環境変数 `AZURE_DEEP_MAX_CONCURRENCY` で変更可能）により API レートリミット（429）を防止。
+   - UI 進捗表示: `thought_status.update(label="Executing parallel subtasks (k/N)...")` でリアルタイム通知。
+   - 耐障害性: サブタスクが例外を送出した場合でも `state_manager.add_debug_log` に記録し、エラーメッセージを材料として Phase 3 に引き継ぐ（ベストエフォート救済）。
+3. **Phase 3: 思考ストリーミング & 統合推論 (Synthesizer)**:
+   - サブタスクで収集した全材料を Markdown 形式でフォーマットし、システム指示文（`synthesis_instruction`）に結合。
+   - `async_stream_response` をユーザー指定の `reasoning_effort`（`high` または `deep`）でストリーミング呼び出し。
+   - `thought_delta`（モデルの思考過程）および `text_delta`（回答本文）を Streamlit の UI プレースホルダーへ逐次描画。
+
+#### 9.1.4 同期・非同期ブリッジ機構 (`_run_coroutine`)
+- Streamlit の実行スレッドは同期ブロッキングモデルです。
+- `_run_coroutine` は `asyncio.get_running_loop()` を検査し、すでにイベントループが実行されている環境では `concurrent.futures.ThreadPoolExecutor(max_workers=1)` を生成して別スレッドで `asyncio.run(coro)` を実行。イベントループ非稼働環境では直接 `asyncio.run(coro)` を呼び出すことで、スレッド競合やデッドロックを完全に防止しています。
 
 ---
 
@@ -659,6 +885,8 @@ graph LR
         az_builder[azure_context_builder.build_materialized_context]
         router[llm_router.generate_content_with_retry]
         az_router[azure_normal_chat.run_normal_generation]
+        az_orch[azure_deep_orchestrator.run_orchestrated_generation]
+        az_resp_router[azure_responses_router.async_stream/generate]
     end
 
     subgraph Agents
@@ -681,6 +909,8 @@ graph LR
     main --> az_builder
     main --> router
     main --> az_router
+    az_router -- "gpt-5.6/6 & high/deep" --> az_orch
+    az_orch --> az_resp_router
     main --> reasoning
     main --> research
     main --> report
@@ -701,6 +931,8 @@ graph LR
 | :--- | :--- | :--- | :--- |
 | **`429 Rate Limit (Vertex AI)`** | `llm_router.py` | Priorityクライアント切替 → 指数バックオフトライ → Azure Fallback | トースト警告 / Azure切替表示 |
 | **`AzureContextBuildError`** | `azure_context_builder.py`| PDF添付時等、Azure非対応コンテキストを検知しフォールバック抑止 | UIにGCPエラーをそのまま通知 |
+| **`Orchestrator Phase 1 JSONDecodeError`** | `azure_deep_orchestrator.py` | `_safe_json_loads` でフェンス除去後もパース失敗時は Phase 2 をスキップし単一直接推論（Early Exit） | UIクラッシュ回避、シームレス回答生成 |
+| **`Orchestrator Phase 2 Subtask Error`** | `azure_deep_orchestrator.py` | サブタスク例外をログ記録し、エラー文を材料として Phase 3 へ引き継ぐ（ベストエフォート救済） | UI進捗更新、総合回答内で分析補完 |
 | **`Python Execution Syntax/Runtime Error`**| `execution_engine.py` | TracebackをAIにフィードバックし自己修復ループ（最大2回） | 修復中スピナー / 最終エラー表示 |
 | **`Playwright Overflow Error`** | `pptx_agent.py` | 文字数30~50%削減要約リライト（最大3回） → フォント-2pt縮小 | スライド自動調整中メッセージ |
 | **`PowerPoint COM Error`** | `utils.py` | プロセス強制クリーンアップ、テキストのみ抽出フォールバック | 警告メッセージ表示 |
@@ -710,21 +942,65 @@ graph LR
 
 ## 第12章: 設定ファイル & プロンプト定義完全仕様 (Configuration & Prompts)
 
-- **`prompts/prompts.yaml`**:
-  - `default_system_prompt`: 汎用AIアシスタントプロンプト。
-  - `engineer`: エンジニア特化型プロンプト。
-  - `translator`: 翻訳アシスタントプロンプト。
-  - `report_pdf`: A4横カードUI HTMLスライド生成用テンプレートプロンプト。
-  - `pptx_system_instruction`: Marp設計思想を統合したPowerPointスライド生成プロンプト。
-- **`config.yaml`**:
-  - Canvasへのファイル読込で許可する拡張子リスト（`.py`, `.js`, `.md`, `.txt`, `.yaml`, `.json` 等）。
-- **`sample_of.env`**:
-  - GCP、Vertex AI、Azure OpenAI、Cloud Logging の全設定パラメータ定義。
+### 12.1 プロンプト設定ファイル (`prompts/prompts.yaml`)
+- `default_system_prompt`: 汎用AIアシスタントプロンプト（汎用知識、コーディング、ドキュメント解析、画像理解、データ分析）。
+- `engineer`: エンジニア特化型プロンプト。
+- `translator`: 翻訳アシスタントプロンプト。
+- `report_pdf`: A4横カードUI HTMLスライド生成用テンプレートプロンプト。
+- `pptx_system_instruction`: Marp設計思想を統合したPowerPointスライド生成プロンプト。
+
+### 12.2 静的構成設定 (`config.yaml`)
+- Canvasへのファイル読込で許可する拡張子リスト（`.py`, `.js`, `.md`, `.txt`, `.yaml`, `.json`, `.csv`, `.sql` 等）。
+
+### 12.3 環境変数設定サンプル (`sample_of.env`)
+- **GCP / Vertex AI**:
+  - `GCP_PROJECT_ID`: Google Cloud プロジェクトID。
+  - `GCP_LOCATION`: Vertex AI のリージョン（デフォルト: `global`）。
+  - `GOOGLE_APPLICATION_CREDENTIALS`: サービスアカウントキーのファイルパス。
+  - `GEMINI_MODEL_ID`: デフォルトのモデルID（デフォルト: `gemini-3.8-flash`）。
+  - `MAX_TOKEN`: 生成最大トークン数（デフォルト: `65536`）。
+- **Azure OpenAI**:
+  - `AZURE_OPENAI_ENV_FILE`: 外部環境変数ファイルの参照パス（任意）。
+  - `AZURE_OPENAI_ENDPOINT`: リソースのエンドポイントURL。
+  - `AZURE_OPENAI_API_KEY`: APIアクセスキー。
+  - `AZURE_OPENAI_GPT54_DEPLOYMENT`: 標準GPTモデル用デプロイ名。
+  - `AZURE_OPENAI_CODEX_DEPLOYMENT`: コーディング専用Codex用デプロイ名（例: `gpt-5.3-codex`）。
+  - `AZURE_OPENAI_SOL_DEPLOYMENT`: 専用用途推論モデル用デプロイ名（例: `gpt-5.6-sol`）。
+  - `AZURE_OPENAI_GPT6_DEPLOYMENT`: 最新フロンティアモデル用デプロイ名（例: `gpt-6-astra`）。
+  - `AZURE_DEEP_MAX_CONCURRENCY`: GPT-5.6 / GPT-6 並行サブタスクの最大同時実行数（デフォルト: `3`）。
+- **Cloud Logging**:
+  - `GP_CHAT_CLOUD_LOGGING_ENABLED`: 監査ログ送信フラグ（デフォルト: `"true"`）。
+  - `GP_CHAT_LOG_SERVICE_NAME`: サービス識別名（デフォルト: `"gp-chat-app"`）。
+
+### 12.4 依存パッケージ仕様 (`pyproject.toml` / `requirements.txt`)
+システムの完全な再現性と長期稼働安定性を保証するため、全22個の依存パッケージが実績値（`==`）で完全固定されています。
+- `streamlit==1.52.2`
+- `google-genai==2.22.0`（Gemini 3.8 Flash 公式対応、遅延インポート高速化）
+- `google-auth==2.57.1`
+- `openai==3.8.0`（OpenAI Python SDK v3.x）
+- `httpx2==2.12.0` および `h2==4.4.1`（HTTP/2 多重化通信エンジン）
+- `python-pptx==1.0.2`, `playwright==1.61.0`（PowerPoint ネイティブ生成 & 幾何学バリデーション）
+- `python-calamine==0.6.2`, `openpyxl==3.1.5`, `python-docx==1.2.0`（Officeファイル高速パース）
+- `pillow==11.1.0`, `matplotlib==3.10.8`, `pandas==2.3.3`, `pylint==4.0.4` 等
 
 ---
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-09-05**
+  * システム設計仕様書 (software-sheet.md) の完全最新化:
+    * アプリケーションの直近の全アップデート（GPT-6対応、httpx2によるHTTP/2通信基盤、GPT-5.6/6高推論限定のAPI並行処理オーケストレーター、Gemini 3.8 Flash対応、思考プロセスの折りたたみ永続化、全依存関係完全固定）を仕様書全体（第1章〜第13章）に整合・反映。
+    * 第1章（コア設計原則）に GPT-6 直接接続および HTTP/2 多重化推論アーキテクチャを追加。
+    * 第2章（モジュール一覧）に `azure_deep_orchestrator.py` を追加し、各モジュール詳細仕様を個別セクションに拡充。
+    * 第3章に `azure_common_types.py` の最新スキーマおよび `AZURE_DEEP_PLANNER_SCHEMA` を反映。
+    * 第4章・第5章に `gemini-3.8-flash` 初期値および思考プロセスのアコーディオン折りたたみ表示仕様（`st.expander`）を追記。
+    * 第7章に Gemini 3.8 Flash の主系運用および Azure Direct ルーティング（GCPバイパス）を追記。
+    * 第9章に GPT-5.6 / GPT-6 専用ハイブリッド・オーケストレーターの完全仕様（3層パイプライン、シーケンス図、セマフォ制御、JSONパース保護、非同期ブリッジ）を詳細記述。
+    * 第10章（Call Graph）および第11章（エラーハンドリングマトリクス）にオーケストレーターの通信経路・例外回復アクションを反映。
+    * 第12章に環境変数（`AZURE_OPENAI_GPT6_DEPLOYMENT`, `AZURE_DEEP_MAX_CONCURRENCY` 等）および全22パッケージ完全固定仕様を追記。
+  * 思考プロセスの折りたたみ永続化 & 全依存関係の完全固定（==化）:
+    * `main.py` において、回答完了後もタスク分割や思考過程をいつでも振り返れるよう、メッセージデータに `thought_log` を永続化し、チャット履歴描画ループに `st.expander("🧠 思考プロセス (Thinking Process)", expanded=False)` を追加。
+    * アプリケーションの動作再現性と長期稼働安定性を高めるため、`pyproject.toml` および `requirements.txt` の全依存パッケージ（22個＋build）を動作検証済みの実績バージョン（`==`）に統一・完全固定。
 * **2026-09-05**
   * 第三者レビュー & 堅牢化検証 (/review):
     * `azure_deep_orchestrator.py` のタスク分解（Phase 1）において、マークダウンコードブロックや前後の解説文が混入した場合でも確実に JSON を抽出・復元する `_safe_json_loads` を実装。

@@ -658,8 +658,10 @@ def run_chatbot_app():
     for i, msg in enumerate(st.session_state['messages']):
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-                
+                if msg["role"] == "assistant" and msg.get("thought_log"):
+                    with st.expander("🧠 思考プロセス (Thinking Process)", expanded=False):
+                        st.markdown(msg["thought_log"])
+                st.markdown(msg["content"])      
                 # --- PowerPointダウンロードボタン表示ロジック ---
                 if "pptx_path" in msg and msg["pptx_path"]:
                     pptx_path = msg["pptx_path"]
@@ -1167,6 +1169,8 @@ def run_chatbot_app():
                     st.session_state['last_usage_info'] = current_usage
 
                 assistant_msg = {"role": "assistant", "content": full_response}
+                if full_thought_log:
+                    assistant_msg["thought_log"] = full_thought_log
                 if current_usage:
                     assistant_msg["usage"] = current_usage
                     if not used_azure_fallback:
@@ -1373,6 +1377,8 @@ def run_chatbot_app():
                             st.session_state['last_usage_info'] = current_usage
 
                         assistant_msg = {"role": "assistant", "content": full_response}
+                        if full_thought_log:
+                            assistant_msg["thought_log"] = full_thought_log
                         if current_usage:
                             assistant_msg["usage"] = current_usage
                             # Azureルート使用時は GCP Logging への送信をスキップします
