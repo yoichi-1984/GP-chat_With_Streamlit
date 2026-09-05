@@ -2,17 +2,17 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/framework-Streamlit%201.52.2-FF4B4B.svg)](https://streamlit.io/)
-[![Google GenAI](https://img.shields.io/badge/LLM-Google%20GenAI%20SDK%202.4.0-4285F4.svg)](https://cloud.google.com/vertex-ai)
-[![Azure OpenAI](https://img.shields.io/badge/LLM-Azure%20OpenAI-0078D4.svg)](https://azure.microsoft.com/products/ai-services/openai-service)
+[![Google GenAI](https://img.shields.io/badge/LLM-Google%20GenAI%20SDK%202.22.0-4285F4.svg)](https://cloud.google.com/vertex-ai)
+[![OpenAI SDK](https://img.shields.io/badge/LLM-OpenAI%203.8.0%20%2F%20httpx2-0078D4.svg)](https://azure.microsoft.com/products/ai-services/openai-service)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
 ---
 
 ## 📖 はじめに (Introduction)
 
-`GP-Chat` は、Google Cloud Platform (Vertex AI) の **Gemini モデル群** および **Azure OpenAI サービス** を高度に統合・最適化した、エンタープライズ対応の Streamlit ベース次世代 AI ワークステーションです。
+`GP-Chat` は、Google Cloud Platform (Vertex AI) の **Gemini モデル群 (最新フラッグシップ Gemini 3.8 Flash 含む)** および **Azure OpenAI サービス (GPT-5.6 / GPT-6 含む)** を高度に統合・最適化した、エンタープライズ対応の Streamlit ベース次世代 AI ワークステーションです。
 
-本ドキュメントは、本アプリケーションの**完全なシステム仕様書兼開発・運用マニュアル**です。システムの全体アーキテクチャ、ファイル構造、UI/UX 挙動、特化型自律エージェントの内部アルゴリズム、二重化ルーティングと障害耐性、コンテキスト管理、および全セッション状態変数に至るまで、すべての設計情報を余すことなく網羅しています。
+本ドキュメントは、本アプリケーションの**システム仕様書兼開発・運用マニュアル**です。システムの全体アーキテクチャ、ファイル構造、UI/UX 挙動、特化型自律エージェントの内部アルゴリズム、二重化ルーティングと障害耐性、コンテキスト管理、および全セッション状態変数に至るまで、主要な設計情報を網羅しています。
 
 ---
 
@@ -39,9 +39,13 @@ GP-Chat は、一般的な対話型チャットの枠を超え、データ分析
 
 ### 🌟 コア機能ハイライト
 - **ハイブリッド LLM 冗長化構成**:
-  - 主系: **GCP Vertex AI (Gemini)** を Standard / Priority クライアントの二重化制御で利用。
+  - 主系: **GCP Vertex AI (`gemini-3.8-flash` 等)** を Standard / Priority クライアントの二重化制御で利用。
   - 副系: API レートリミット（429）や障害検知時に **Azure OpenAI** へ自動フォールバック。
-  - 特化モデル: `gpt-5.3-codex` / `gpt-5.6` 選択時は GCP をバイパスし Azure へ直接接続。
+  - 特化モデル: `gpt-5.3-codex` / `gpt-5.6` / `gpt-6` 選択時は GCP をバイパスし Azure へ直接接続。
+- **GPT-5.6 / GPT-6 専用 HTTPX2並行ハイブリッドオーケストレーター**:
+  - 重推論（`high`/`deep`）実行時の APIM タイムアウト（504）を回避するため、タスク分解（Phase 1）→ HTTP/2 多重化並行実行（Phase 2）→ 思考ストリーミング統合推論（Phase 3）の自律パイプラインを搭載。
+- **思考プロセスの折りたたみ永続化**:
+  - 回答完了後の画面再描画後も、思考過程や並行タスク結果をメッセージ上部のアコーディオン（`st.expander`）からいつでも閲覧可能。
 - **最大 40 スロットのマルチ Canvas コードエディタ**:
   - 独立した Python エディタ（Ace Editor）を統合。コード入力やファイル読込時に送信フラグを動的 ON 化。Pylint による構文自動検証付き。
 - **5つの特化型自律エージェント**:
@@ -64,7 +68,7 @@ graph TD
     
     Builder --> Router{llm_router: モデル判定}
     Router -->|Gemini モデル| StandardClient[Vertex AI Standard Client]
-    Router -->|gpt-5.3-codex / gpt-5.6| AzureDirect[Azure OpenAI 直接接続]
+    Router -->|gpt-5.3-codex / gpt-5.6 / gpt-6| AzureDirect[Azure OpenAI 直接接続]
     
     StandardClient -->|429 / 一時エラー| PriorityClient[Vertex AI Priority Client + Jitterリトライ]
     PriorityClient -->|全リトライ失敗| AzureFallback[Azure OpenAI 自動フォールバック]
@@ -142,7 +146,8 @@ gp-chat/
         ├── azure_common_types.py # Azure共通データ型定義
         ├── azure_history_utils.py # Azure用履歴変換ユーティリティ
         ├── azure_normal_chat.py # Azure用通常チャットハンドラ
-        ├── azure_responses_router.py # Azure用レスポンスルーティング
+        ├── azure_responses_router.py # Azure用レスポンスルーティング (httpx2 HTTP/2 対応)
+        ├── azure_deep_orchestrator.py # GPT-5.6/6 専用 HTTPX2並行ハイブリッドオーケストレーター
         ├── azure_code_agent.py # Azure用コード実行・修復エージェント
         ├── azure_reasoning_agent.py # Azure用Deep Reasoningエージェント
         ├── azure_research_agent.py # Azure用徹底調査エージェント
@@ -155,8 +160,8 @@ gp-chat/
 | モジュール名 | 主要クラス / 関数 | 主な責務・内部動作 |
 | :--- | :--- | :--- |
 | `main_runner.py` | `run()` | CLIコマンド `gp-chat` のエントリポイント。`sys.argv` を構築して `streamlit.web.cli.main()` を呼出。 |
-| `main.py` | `main()` | UI全体の描画制御、セッション初期化、チャット入力受付、ストリーミング出力、モデル別バイパス・Azure Fallback制御。 |
-| `sidebar.py` | `render_sidebar()` | サイドバー描画、`.env` 切替、モデル選択、Thinking Level、排他トグル制御、Canvas（st_ace）描画、履歴ロード/リセット。 |
+| `main.py` | `main()` | UI全体の描画制御、セッション初期化、チャット入力受付、ストリーミング出力、思考ログ永続化、モデル別バイパス・Azure Fallback制御。 |
+| `sidebar.py` | `render_sidebar()` | サイドバー描画、`.env` 切替、モデル選択（9モデル）、Thinking Level、排他トグル制御、Canvas（st_ace）描画、履歴ロード/リセット。 |
 | `config.py` | `UITexts`, `SESSION_STATE_DEFAULTS` | システム定数（最大Canvas数=40、タイムアウト=30秒、リトライ間隔）、UI文言、選択可能モデル一覧、初期状態定義。 |
 | `utils.py` | `parse_file()`, `build_materialized_chat_context()` | Word/Excel/PPT/PDF/画像のマルチモーダルパース、MIME判定、プロンプト読込、Gemini用Partリスト構築。 |
 | `state_manager.py` | `save_chat_history()`, `cleanup_session_on_load()` | 会話履歴のJSON保存/読込、会話分岐（`✂️`）、中断検知・ドラフト復元、不要な一時ウィジェットキー削除。 |
@@ -168,7 +173,10 @@ gp-chat/
 | `research_agent.py` | `run_research_agent()` | 情報過不足をJSON評価しながらGoogle検索を自律反復する最大3サイクルのReAct型深掘り調査。 |
 | `report_agent.py` | `run_report_agent()` | 会話履歴からA4横向きHTMLプレゼンを生成し、Headlessブラウザ（Edge/Chrome）でPDFへ自動エクスポート。 |
 | `pptx_agent.py` | `run_pptx_agent()` | PowerPointネイティブ生成。JSON DSL生成、Playwright幾何学溢れバリデーション、画像生成/トリミング、物理PPTX生成の4層構造。 |
-| `azure_runtime.py` | `get_azure_client()`, `get_azure_config()` | Azure OpenAI クライアント初期化、エンドポイント・APIキー・デプロイメント名の検証と管理。 |
+| `azure_runtime.py` | `load_azure_runtime_from_env()` | Azure OpenAI クライアント初期化、エンドポイント・APIキー・Codex/GPT-5.6/GPT-6専用デプロイメント名の検証と管理。 |
+| `azure_responses_router.py` | `generate_response()`, `async_stream_response()` | OpenAI SDK v3.x による同期/非同期（httpx2 HTTP/2多重化）二重化クライアント・通信ルーター。 |
+| `azure_deep_orchestrator.py` | `run_orchestrated_generation()` | GPT-5.6 / GPT-6 専用 HTTPX2並行ハイブリッドオーケストレーター（タスク分解・並行回収・思考ストリーミング）。 |
+| `azure_normal_chat.py` | `run_normal_generation()` | Azure通常チャット。対象推論モデル・高推論時はオーケストレーターへ自動ディスパッチ。 |
 | `azure_context_builder.py` | `build_materialized_context()` | Gemini用コンテキストをAzure OpenAI API形式（画像base64、PDF非対応例外ハンドリング）に変換。 |
 | `azure_supervisor_helpers.py` | `should_fallback_to_azure()` | GCP側のエラー状態・デバッグログを検査し、Azure側への切り替え要否を判定。 |
 | `cloud_logging_utils.py` | `send_cloud_log()` | GCP Cloud Logging への監査ログ送信。Azure直接接続・フォールバック時は自動スキップ。 |
@@ -185,13 +193,14 @@ gp-chat/
   - **Linux (Ubuntu等)** (PowerPoint添付時のCOM変換を除く全機能に対応)
 
 ### ② 主要依存パッケージ完全マトリクス
+システムの完全な再現性を担保するため、すべての依存パッケージが動作検証済みの実績バージョン（`==`）で固定されています。
 
 ```toml
-# pyproject.toml より抜粋
+# pyproject.toml より抜粋 (全22パッケージ固定)
 dependencies = [
     "streamlit==1.52.2",              # WebUIフレームワーク
-    "google-genai==2.4.0",             # Google GenAI 統一 SDK (Vertex AI / Gemini)
-    "google-auth==2.53.0",             # GCP 認証ライブラリ
+    "google-genai==2.22.0",            # Google GenAI 統一 SDK (Gemini 3.8 Flash 公式対応)
+    "google-auth==2.57.1",             # GCP 認証ライブラリ
     "google-cloud-logging==3.15.0",    # GCP Cloud Logging 監査ログ送信用
     "python-dotenv==1.2.1",            # .env 環境変数ローダー
     "streamlit-ace==0.1.1",            # コードエディタ (Ace Editor) ウィジェット
@@ -202,13 +211,15 @@ dependencies = [
     "pillow==11.1.0",                  # 画像処理 & バウンディングボックストリミング
     "pandas==2.3.3",                   # データ分析 & 表形式データ処理
     "matplotlib==3.10.8",              # ローカルグラフ自動描画
-    "openai>=2.45.0",                  # Azure OpenAI 接続用クライアント
-    "openpyxl>=3.1.2",                 # Excel (.xlsx) 読込
-    "xlrd>=2.0.1",                     # 旧形式 Excel (.xls) 読込
-    "python-calamine>=0.2.0",          # 高速 Excel 解析エンジン (Rust製)
-    "tabulate>=0.9.0",                 # DataFrame の Markdown テーブル変換
-    "python-pptx>=1.0.2",              # PowerPoint (.pptx) 物理ファイル生成
-    "playwright>=1.49.0"               # PowerPoint 幾何学バリデーション用 Headless ブラウザ
+    "openai==3.8.0",                   # Azure OpenAI 接続用クライアント (v3.x)
+    "httpx2==2.12.0",                  # HTTP/2 多重化非同期通信基盤
+    "h2==4.4.1",                       # HTTP/2 プロトコル実装
+    "openpyxl==3.1.5",                 # Excel (.xlsx) 読込
+    "xlrd==2.0.2",                     # 旧形式 Excel (.xls) 読込
+    "python-calamine==0.6.2",          # 高速 Excel 解析エンジン (Rust製)
+    "tabulate==0.10.0",                # DataFrame の Markdown テーブル変換
+    "python-pptx==1.0.2",              # PowerPoint (.pptx) 物理ファイル生成
+    "playwright==1.61.0"               # PowerPoint 幾何学バリデーション用 Headless ブラウザ
 ]
 ```
 
@@ -268,12 +279,15 @@ cp sample_of.env env/default.env
 | **`GCP_PROJECT_ID`** | **必須** | - | `your-gcp-project-id` | Google Cloud プロジェクト ID。 |
 | **`GCP_LOCATION`** | **必須** | `global` | `global`, `us-central1`, `asia-northeast1` | Vertex AI の Gemini が稼働するリージョン。 |
 | **`GOOGLE_APPLICATION_CREDENTIALS`** | **必須** (ローカル時) | - | `C:/keys/service-account.json` | GCP サービスアカウントキー (JSON) の絶対パス。 |
-| **`GEMINI_MODEL_ID`** | 任意 | `gemini-3.7-flash` | `gemini-3.7-flash`, `gemini-3-pro` | UI 起動時のデフォルトモデル ID。 |
+| **`GEMINI_MODEL_ID`** | 任意 | `gemini-3.8-flash` | `gemini-3.8-flash`, `gemini-3.7-flash` | UI 起動時のデフォルトモデル ID。 |
 | **`MAX_TOKEN`** | 任意 | `65536` | `65536`, `8192` | LLM が生成する最大出力トークン数。 |
 | **`AZURE_OPENAI_ENDPOINT`** | 任意 (Azure利用時) | - | `https://xxxx.openai.azure.com/` | Azure OpenAI サービスのエンドポイント URL。 |
 | **`AZURE_OPENAI_API_KEY`** | 任意 (Azure利用時) | - | `32桁の16進数キー` | Azure OpenAI API キー。 |
 | **`AZURE_OPENAI_GPT54_DEPLOYMENT`** | 任意 (Azure利用時) | - | `gpt-54-prod` | Azure 側の標準フォールバック用デプロイメント名。 |
 | **`AZURE_OPENAI_CODEX_DEPLOYMENT`** | 任意 (Codex利用時) | `GPT54設定値を流用` | `gpt-5.3-codex-deployment` | `gpt-5.3-codex` 選択時に使用される専用デプロイメント名。 |
+| **`AZURE_OPENAI_SOL_DEPLOYMENT`** | 任意 (推論モデル時) | `GPT54設定値を流用` | `gpt-5.6-sol` | `gpt-5.6` 選択時に使用される専用デプロイメント名。 |
+| **`AZURE_OPENAI_GPT6_DEPLOYMENT`** | 任意 (GPT-6利用時) | `GPT54設定値を流用` | `gpt-6-astra` | `gpt-6` 選択時に使用される専用デプロイメント名。 |
+| **`AZURE_DEEP_MAX_CONCURRENCY`** | 任意 | `3` | `3`, `5` | GPT-5.6 / GPT-6 並行サブタスクの最大同時実行数。 |
 | **`AZURE_OPENAI_ENV_FILE`** | 任意 | - | `C:/path/to/azure.env` | Azure 設定を外部の別 `.env` から読込む場合のパス。 |
 | **`GP_CHAT_CLOUD_LOGGING_ENABLED`**| 任意 | `true` | `true` / `false` | GCP Cloud Logging への監査ログ送信の有効化フラグ。 |
 | **`GP_CHAT_LOG_SERVICE_NAME`** | 任意 | `gp-chat-app` | `gp-chat-production` | Cloud Logging に記録されるサービス識別名。 |
@@ -355,14 +369,17 @@ streamlit run src/gp_chat/main.py
 | 設定項目 | 選択値 / 機能概要 | 連動・ロック仕様マトリクス |
 | :--- | :--- | :--- |
 | **Environment** | `.env` ファイルの動的切替 | 生成中 (`is_generating=True`) は無効化。 |
-| **Target Model** | モデル選択（`gemini-3.7-flash`, `gpt-5.3-codex` 等） | `gpt-5.3-codex` / `gpt-5.6` 選択時は最初から Azure OpenAI に直接接続（GCPバイパス）。 |
-| **Thinking Level** | `low` / `high` / `deep` (推論レベル) | 「徹底調査」または「レポート機能 (pdf/pptx)」が ON の時は **強制的に `high` に固定され UI がロック**。生成中は無効化。 |
+| **Target Model** | モデル選択（`gemini-3.8-flash`, `gpt-6` 等9モデル） | `gpt-5.3-codex` / `gpt-5.6` / `gpt-6` 選択時は最初から Azure OpenAI に直接接続（GCPバイパス）。 |
+| **Thinking Level** | `high` / `medium` / `low` / `deep` (推論レベル) | 「徹底調査」または「レポート機能 (pdf/pptx)」が ON の時は **強制的に `high` に固定され UI がロック**。生成中は無効化。 |
 | **Web検索** | Google Search Grounding の ON/OFF | 「徹底調査」が ON の時は **強制的に ON に固定され UI がロック**。生成中は無効化。 |
 | **徹底調査** | `More Research` 自律反復検索 | 「Thinking Level: deep」または「レポート機能 (pdf/pptx)」が ON の時は **選択不可（UI ロック）**。生成中は無効化。 |
 | **レポート機能（pdf）** | HTML/PDFスライド自動生成 | 「徹底調査」「Thinking Level: deep」「レポート機能(pptx)」のいずれかが ON の時は **選択不可（UI ロック）**。ON 時は Thinking Level が `high` に固定。 |
 | **レポート機能（pptx）** | PowerPointネイティブ自動生成 | 「徹底調査」「Thinking Level: deep」「レポート機能(pdf)」のいずれかが ON の時は **選択不可（UI ロック）**。ON 時は Thinking Level が `high` に固定。 |
 | **グラフ描画・データ分析** | Pythonコード自動実行 (`auto_plot`) | ON の時のみ、応答内の Python コードブロックをローカル実行してグラフを表示。生成中は無効化。 |
 | **履歴ファイルを選択** | 保存された JSON から会話を再開 | 読込実行時に添付キューや一時ウィジェットキーを自動クリーンアップして再構築。生成中は無効化。 |
+
+- **思考プロセスの折りたたみ表示 (`st.expander`)**:
+  - 生成中の一時表示に加え、回答完了後もメッセージ上部に `🧠 思考プロセス (Thinking Process)` の折りたたみアコーディオンを常時表示。クリックで展開してタスク分割や並行収集材料、推論ログを振り返ることが可能です。
 
 ### ③ マルチスロット Canvas コードエディタ
 - 最大 **40 スロット** の独立した Ace Editor（Python構文ハイライト、Monokaiテーマ）が常時利用可能。
@@ -540,13 +557,19 @@ Marp の設計思想を取り入れた、PowerPoint ファイル（`.pptx`）の
 - **処理**: リトライ用にディープコピーしておいたコンテキストスナップショットを用いて Azure OpenAI API に切り替えてリクエストを再送し、ユーザーに応答をシームレスに継続します。
 
 ### ③ Azure 直接接続 (GCP バイパス)
-- UI のモデル選択で `gpt-5.3-codex` または `gpt-5.6` が選択された場合、Vertex AI へのリクエストを行わず、最初から Azure OpenAI へ直接接続して応答を生成します。
+- UI のモデル選択で `gpt-5.3-codex`、`gpt-5.6`、または `gpt-6` が選択された場合、Vertex AI へのリクエストを行わず、最初から Azure OpenAI へ直接接続して応答を生成します。
 
 ### ④ GCP Cloud Logging 最適化
 - Azure 直接接続時および Azure フォールバックが機能した際は、GCP 側の権限エラー（403 Forbidden）による無駄なエラーログの発生を防ぐため、Cloud Logging 送信処理を自動的にスキップします。
 
 ### ⑤ 開発用疑似エラー注入 (Fault Injection)
 - `dev/fault_injection.local.toml` を配置することで、GCP 呼び出し時に意図的に 429 エラーや 500 エラーを発生させ、Azure フォールバックやリトライの挙動を安全にシミュレーション・テストできます（`azure_fault_injection.py`）。
+
+### ⑥ GPT-5.6 / GPT-6 専用 HTTPX2並行ハイブリッドオーケストレーター
+- `gpt-5.6` または `gpt-6` を高推論モード（`high`/`deep`）で実行する際、中間プロキシの無通信タイムアウト（504）を回避するため、以下の自律3層処理を実行します。
+  1. **Phase 1 (タスク分解)**: 軽量設定で課題を独立した並行サブタスクに分解（単一タスク時は Phase 3 へ Early Exit）。
+  2. **Phase 2 (HTTP/2 並行回収)**: `httpx2` による HTTP/2 多重化接続上でサブタスクを並行実行し材料を高速回収。
+  3. **Phase 3 (思考ストリーミング統合推論)**: 収集材料を統合し、思考ログをリアルタイム逐次描画しながら高推論を実行。
 
 ---
 
@@ -587,10 +610,10 @@ Marp の設計思想を取り入れた、PowerPoint ファイル（`.pptx`）の
 
 | 変数名 | 型 | 初期値 | 役割・用途 |
 | :--- | :---: | :--- | :--- |
-| `messages` | `list[dict]` | `[]` | 会話履歴の辞書リスト（ロール、コンテンツ、Grounding情報、トークン情報等）。 |
+| `messages` | `list[dict]` | `[]` | 会話履歴の辞書リスト（ロール、コンテンツ、Grounding情報、トークン情報、`thought_log` 永続化等）。 |
 | `system_role_defined` | `bool` | `False` | システムプロンプトが確定してチャット画面に移行したかどうかのフラグ。 |
-| `current_model_id` | `str` | `gemini-3.7-flash` | 現在選択されているターゲットモデル ID。 |
-| `reasoning_effort` | `str` | `high` | 現在の Thinking Level (`low`, `high`, `deep`)。 |
+| `current_model_id` | `str` | `gemini-3.8-flash` | 現在選択されているターゲットモデル ID。 |
+| `reasoning_effort` | `str` | `high` | 現在の Thinking Level (`high`, `medium`, `low`, `deep`)。 |
 | `enable_google_search` | `bool` | `True` | Google Search Grounding の有効化フラグ。 |
 | `enable_more_research` | `bool` | `False` | 徹底調査モード（More Research）の有効化フラグ。 |
 | `report_mode_pdf` | `bool` | `False` | レポート機能（PDF）の有効化フラグ。 |
