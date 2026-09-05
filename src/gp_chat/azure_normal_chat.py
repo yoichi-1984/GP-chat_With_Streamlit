@@ -38,6 +38,26 @@ def run_normal_generation(
     thought_placeholder,
     model_id: str | None = None,
 ) -> AzureModeResult:
+    is_target_reasoning_model = bool(
+        model_id and any(tok in model_id.lower() for tok in ("5.6", "6"))
+    )
+    is_heavy_reasoning = effort in ("high", "deep")
+
+    if is_target_reasoning_model and is_heavy_reasoning and not is_special_mode:
+        from . import azure_deep_orchestrator
+
+        return azure_deep_orchestrator.run_orchestrated_generation(
+            runtime=runtime,
+            context=context,
+            max_output_tokens=max_output_tokens,
+            search_enabled=search_enabled,
+            effort=effort,
+            text_placeholder=text_placeholder,
+            thought_status=thought_status,
+            thought_placeholder=thought_placeholder,
+            model_id=model_id,
+        )
+
     is_fallback = (model_id not in config.AZURE_DIRECT_MODELS)
     log_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
     state_manager.add_debug_log(f"[{log_prefix} Normal] Starting generation.")

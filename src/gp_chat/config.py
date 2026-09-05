@@ -1,3 +1,5 @@
+import os
+
 # --- Constants ---
 MAX_CANVASES = 40
 
@@ -142,3 +144,59 @@ class UITexts:
     # --- 新規追加 ---
     MORE_RESEARCH_LABEL = "徹底調査モード (More Research)"
     MORE_RESEARCH_HELP = "AIに複数回のWeb検索と自問自答を強制し、情報の正確性を高めます。回答に時間がかかります。"
+
+
+# --- Azure Deep Orchestrator Settings (GPT-5.6 / GPT-6) ---
+AZURE_DEEP_MAX_CONCURRENCY = int(os.getenv("AZURE_DEEP_MAX_CONCURRENCY", "3"))
+
+AZURE_DEEP_PLANNER_PROMPT = """You are an expert Task Planner and Orchestrator.
+Analyze the user request, instructions, and context to determine if the task requires parallel subtask execution.
+Parallel subtasks are recommended when:
+1. Multiple distinct topics, viewpoints, or components need independent research or extraction.
+2. Multiple documents, files, or data chunks need to be inspected or summarized.
+3. Multiple alternative candidate solutions or comparisons need to be investigated.
+
+If the task is straightforward, short, or does not benefit from parallel breakdown, set `needs_parallel_subtasks` to false and provide an empty list for `subtasks`.
+
+If parallel subtasks are beneficial, define 2 to 5 distinct, independent subtasks.
+Each subtask must have:
+- `id`: unique identifier (e.g., "sub_1", "sub_2")
+- `description`: clear, self-contained instruction of what specific data or insight to gather/analyze
+- `query`: search query string if web search is helpful, or empty string if not needed
+"""
+
+AZURE_DEEP_PLANNER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "needs_parallel_subtasks": {
+            "type": "boolean",
+            "description": "Whether parallel subtask execution is needed."
+        },
+        "plan_summary": {
+            "type": "string",
+            "description": "Brief summary of the overall execution approach."
+        },
+        "subtasks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "description": {"type": "string"},
+                    "query": {"type": "string"}
+                },
+                "required": ["id", "description", "query"],
+                "additionalProperties": False
+            },
+            "description": "List of independent subtasks to run in parallel."
+        }
+    },
+    "required": ["needs_parallel_subtasks", "plan_summary", "subtasks"],
+    "additionalProperties": False
+}
+
+AZURE_DEEP_SUBTASK_PROMPT = """You are a focused research and analysis subagent.
+Your goal is to execute the following specific subtask based on the context provided.
+Extract all relevant facts, data, and analytical insights accurately and concisely in Markdown format.
+Focus strictly on the scope of your assigned subtask. Do not include introductory pleasantries.
+"""

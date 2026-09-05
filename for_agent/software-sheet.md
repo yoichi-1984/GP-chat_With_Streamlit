@@ -625,11 +625,22 @@ sequenceDiagram
 
 | モジュール名 | 役割・対応機能 |
 | :--- | :--- |
-| `azure_normal_chat.py` | 通常チャットストリーミングおよび Special モードストリーミング。 |
+| `azure_normal_chat.py` | 通常チャットストリーミングおよび Special モードストリーミング。対象推論モデル（`gpt-5.6`, `gpt-6`）かつ高推論時はオーケストレーターへディスパッチ。 |
+| `azure_deep_orchestrator.py` | 【新設】GPT-5.6 / GPT-6 専用 HTTPX2並行・細切れハイブリッドオーケストレーター。Phase 1（タスク分解）→ Phase 2（HTTP/2 多重化並行実行）→ Phase 3（思考ストリーミング統合推論）。 |
 | `azure_reasoning_agent.py` | Azure OpenAI を用いた 3 段階 Deep Reasoning パイプライン。 |
 | `azure_research_agent.py` | Azure OpenAI を用いた ReAct 型徹底調査ループ。 |
 | `azure_report_agent.py` | Azure OpenAI を用いた HTML プレゼン生成 & PDF 印刷。 |
 | `azure_code_agent.py` | Azure OpenAI を用いた Python コード自動実行 & 自己修復ループ。 |
+
+### 9.1 GPT-5.6 / GPT-6 専用ハイブリッド・オーケストレーター仕様 (`azure_deep_orchestrator.py`)
+1. **目的**: コンテキストが重い状態での高推論（`effort in ("high", "deep")`）におけるゲートウェイタイムアウト（504）を回避し、OpenAI Python SDK 3.x の新通信基盤 `httpx2`（HTTP/2 多重化）を最大限に活用。
+2. **Phase 1: タスク分解 (Planner)**:
+   - 選択中のモデル（`gpt-5.6` または `gpt-6`）を `reasoning_effort="low"` かつ JSON Schema で呼び出し、独立して並行処理可能なサブタスクに分解。短文・単一質問時は Phase 3 へ Early Exit。
+3. **Phase 2: サブタスク並行実行 (HTTP/2 多重化)**:
+   - `asyncio.Semaphore(AZURE_DEEP_MAX_CONCURRENCY)`（デフォルト 3）で並行数を制御しながら、単一の TCP/TLS 接続上で `httpx2` による HTTP/2 多重化 API コールを同時に送信し高速回収。
+   - サブタスク失敗時はベストエフォート型としてログ記録（`state_manager.add_debug_log`）しつつ Phase 3 に引き継ぐ。
+4. **Phase 3: 思考ストリーミング & 統合推論 (Synthesizer)**:
+   - Phase 2 で収集された材料をコンテキストに統合し、高推論モード（`reasoning_effort=effort`）かつ `stream=True` で実行。思考ログ（reasoning delta）および応答テキストを Streamlit UI にリアルタイム逐次描画。
 
 ---
 
@@ -713,6 +724,12 @@ graph LR
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-09-05**
+  * GPT-5.6 / GPT-6 専用 HTTPX2並行・細切れハイブリッドオーケストレーターの導入:
+    * `pyproject.toml` の `openai` 依存を `>=3.0.0` へ上限解除・更新し、`httpx2>=0.1.0` および `h2>=4.1.0` を追加。
+    * `azure_responses_router.py` に `httpx2.AsyncClient(http2=True)` を用いた `_build_async_client`、`async_generate_response`、`async_stream_response` を実装。
+    * `azure_deep_orchestrator.py` を新設し、Phase 1（タスク分解）→ Phase 2（HTTP/2 並行実行）→ Phase 3（思考ストリーミング統合）の3層アーキテクチャを実装。
+    * `azure_normal_chat.py` にて `gpt-5.6` / `gpt-6` かつ `effort in ("high", "deep")` 時のディスパッチ処理を追加。
 * **2026-09-05**
   * `install.bat` の改善: ユーザー環境での `.whl` 上書きインストール時に依存パッケージを `pyproject.toml`（.whl 内の METADATA）通りに自動更新できるよう、`pip install` コマンドに `--upgrade` オプションを追加。
 * **2026-09-05**

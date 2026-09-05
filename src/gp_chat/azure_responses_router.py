@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterator
+from typing import Any, AsyncIterator, Iterator
 
 from .azure_common_types import AzureRouterResult, AzureStreamChunk, AzureUsageMetadata
 from .azure_runtime import AzureRuntime
@@ -301,3 +301,130 @@ def stream_response(
                 or str(error)
                 or "Azure OpenAI stream error."
             )
+
+
+def _build_async_client(runtime: AzureRuntime):
+    import httpx2
+    from openai import AsyncOpenAI
+
+    # HTTP/2 多重化を明示的に有効化、長時間の推論に耐えるタイムアウト設定
+    http_client = httpx2.AsyncClient(
+        http2=True,
+        timeout=httpx2.Timeout(3600.0, connect=60.0),
+    )
+    return AsyncOpenAI(
+        api_key=runtime.api_key,
+        base_url=runtime.base_url,
+        http_client=http_client,
+    )
+
+
+async def async_generate_response(
+    *,
+    runtime: AzureRuntime,
+    input_messages: list[dict[str, object]],
+    instructions: str,
+    max_output_tokens: int,
+    temperature: float | None = None,
+    search_enabled: bool = False,
+    response_mime_type: str | None = None,
+    response_schema: dict[str, Any] | None = None,
+    structured_output_name: str | None = None,
+    reasoning_effort: str | None = None,
+    client: Any | None = None,
+) -> AzureRouterResult:
+    close_client = False
+    if client is None:
+        client = _build_async_client(runtime)
+        close_client = True
+    try:
+        request_kwargs = _build_request_kwargs(
+            runtime=runtime,
+            input_messages=input_messages,
+            instructions=instructions,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            search_enabled=search_enabled,
+            response_mime_type=response_mime_type,
+            response_schema=response_schema,
+            structured_output_name=structured_output_name,
+            stream=False,
+            reasoning_effort=reasoning_effort,
+        )
+        response = await client.responses.create(**request_kwargs)
+        return AzureRouterResult(
+            text=_extract_response_text(response),
+            usage_metadata=_coerce_usage(_get_attr(response, "usage")),
+            grounding_metadata=normalize_grounding(response),
+            response=response,
+        )
+    finally:
+        if close_client:
+            await client.close()
+
+
+async def async_stream_response(
+    *,
+    runtime: AzureRuntime,
+    input_messages: list[dict[str, object]],
+    instructions: str,
+    max_output_tokens: int,
+    temperature: float | None = None,
+    search_enabled: bool = False,
+    response_mime_type: str | None = None,
+    response_schema: dict[str, Any] | None = None,
+    structured_output_name: str | None = None,
+    reasoning_effort: str | None = None,
+    client: Any | None = None,
+) -> AsyncIterator[AzureStreamChunk]:
+    close_client = False
+    if client is None:
+        client = _build_async_client(runtime)
+        close_client = True
+    try:
+        request_kwargs = _build_request_kwargs(
+            runtime=runtime,
+            input_messages=input_messages,
+            instructions=instructions,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            search_enabled=search_enabled,
+            response_mime_type=response_mime_type,
+            response_schema=response_schema,
+            structured_output_name=structured_output_name,
+            stream=True,
+            reasoning_effort=reasoning_effort,
+        )
+        response_stream = await client.responses.create(**request_kwargs)
+        async for event in response_stream:
+            event_type = _get_attr(event, "type", "")
+            if event_type == "response.output_text.delta":
+                delta = _get_attr(event, "delta", "") or ""
+                if delta:
+                    yield AzureStreamChunk(text_delta=delta)
+                continue
+            if event_type == "response.reasoning_summary_text.delta":
+                delta = _get_attr(event, "delta", "") or ""
+                if delta:
+                    yield AzureStreamChunk(thought_delta=delta)
+                continue
+            if event_type == "response.completed":
+                response = _get_attr(event, "response")
+                usage_metadata = _coerce_usage(_get_attr(response, "usage"))
+                grounding_metadata = normalize_grounding(response)
+                if usage_metadata or grounding_metadata:
+                    yield AzureStreamChunk(
+                        usage_metadata=usage_metadata,
+                        grounding_metadata=grounding_metadata,
+                    )
+                continue
+            if event_type == "error":
+                error = _get_attr(event, "error")
+                raise RuntimeError(
+                    _get_attr(error, "message")
+                    or str(error)
+                    or "Azure OpenAI stream error."
+                )
+    finally:
+        if close_client:
+            await client.close()
