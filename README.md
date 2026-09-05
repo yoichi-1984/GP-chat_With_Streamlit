@@ -66,27 +66,34 @@ flowchart TD
     User["ユーザー入力 / 添付ファイル / Canvas"] --> Main["main.py : メインコントローラー"]
     Main --> Builder["utils / azure_context_builder : コンテキスト構築"]
     
-    Builder --> Router{"llm_router : モデル判定"}
-    Router -->|Gemini モデル| StandardClient["Vertex AI Standard Client"]
-    Router -->|gpt-5.3-codex / gpt-5.6 / gpt-6| AzureDirect["Azure OpenAI 直接接続"]
-    
-    StandardClient -->|429 / 一時エラー| PriorityClient["Vertex AI Priority Client with Jitterリトライ"]
-    PriorityClient -->|全リトライ失敗| AzureFallback["Azure OpenAI 自動フォールバック"]
-    
-    StandardClient -->|応答ストリーム| AgentRouter{"特化モード判定"}
-    PriorityClient -->|応答ストリーム| AgentRouter
-    AzureDirect -->|応答ストリーム| AgentRouter
-    AzureFallback -->|応答ストリーム| AgentRouter
-    
-    AgentRouter -->|通常対話| StreamUI["UI ストリーミング出力"]
-    AgentRouter -->|Thinking deep| DeepAgent["reasoning_agent : 立案・批判・統合"]
-    AgentRouter -->|More Research| ResearchAgent["research_agent : ReAct検索ループ"]
-    AgentRouter -->|Auto-Plot| PlotAgent["execution_engine : Python実行・自己修復"]
-    AgentRouter -->|Report PDF| PdfAgent["report_agent : HTML生成・Headless PDF印刷"]
-    AgentRouter -->|Report PPTX| PptxAgent["pptx_agent : Playwright幾何学検証・物理PPTX生成"]
-    
-    AgentRouter --> CloudLogging["GCP Cloud Logging 監査ログ送信 ※Azure時はスキップ"]
-    AgentRouter --> AutoSave["state_manager : chat_log/*.json 自動保存"]
+    subgraph Routing ["モデル選定・フォールバック層"]
+        Builder --> Router{"llm_router : モデル判定"}
+        Router -->|Gemini モデル| StandardClient["Vertex AI Standard Client"]
+        Router -->|gpt-5.3-codex / gpt-5.6 / gpt-6| AzureDirect["Azure OpenAI 直接接続"]
+        
+        StandardClient -->|429 / 一時エラー| PriorityClient["Vertex AI Priority Client with Jitterリトライ"]
+        PriorityClient -->|全リトライ失敗| AzureFallback["Azure OpenAI 自動フォールバック"]
+    end
+
+    StandardClient -->|成功 / 応答ストリーム| AgentRouter{"特化モード判定"}
+    PriorityClient -->|成功 / 応答ストリーム| AgentRouter
+    AzureDirect -->|成功 / 応答ストリーム| AgentRouter
+    AzureFallback -->|成功 / 応答ストリーム| AgentRouter
+
+    subgraph Agents ["エージェント・出力層"]
+        AgentRouter -->|通常対話| StreamUI["UI ストリーミング出力"]
+        AgentRouter -->|Thinking deep| DeepAgent["reasoning_agent : 立案・批判・統合"]
+        AgentRouter -->|More Research| ResearchAgent["research_agent : ReAct検索ループ"]
+        AgentRouter -->|Auto-Plot| PlotAgent["execution_engine : Python実行・自己修復"]
+        AgentRouter -->|Report PDF| PdfAgent["report_agent : HTML生成・Headless PDF印刷"]
+        AgentRouter -->|Report PPTX| PptxAgent["pptx_agent : Playwright幾何学検証・物理PPTX生成"]
+    end
+
+    subgraph PostProcess ["永続化・監査ログ"]
+        StreamUI & DeepAgent & ResearchAgent & PlotAgent & PdfAgent & PptxAgent --> Complete["処理完了"]
+        Complete --> CloudLogging["GCP Cloud Logging 監査ログ送信 ※Azure時はスキップ"]
+        Complete --> AutoSave["state_manager : chat_log/*.json 自動保存"]
+    end
 ```
 
 ---
