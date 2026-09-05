@@ -202,8 +202,8 @@ def _build_client(runtime: AzureRuntime):
 
     # 推論モデル（o1, o3, 5.6等）が長時間思考できるようにタイムアウトを大幅に延長 (60分)
     return OpenAI(
-        api_key=runtime.api_key, 
-        base_url=runtime.base_url, 
+        api_key=runtime.api_key,
+        base_url=runtime.base_url,
         timeout=httpx.Timeout(3600.0, connect=60.0)
     )
 

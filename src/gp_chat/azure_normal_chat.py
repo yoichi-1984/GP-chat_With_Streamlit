@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import streamlit as st
-
 try:
     from gp_chat import config
     from gp_chat import state_manager
@@ -58,7 +56,7 @@ def run_normal_generation(
             model_id=model_id,
         )
 
-    is_fallback = (model_id not in config.AZURE_DIRECT_MODELS)
+    is_fallback = model_id not in config.AZURE_DIRECT_MODELS
     log_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
     state_manager.add_debug_log(f"[{log_prefix} Normal] Starting generation.")
     thought_status.update(label=_thinking_label(is_special_mode, is_fallback, model_id), state="running", expanded=False)

@@ -5,8 +5,6 @@ import concurrent.futures
 import json
 from typing import Any
 
-import streamlit as st
-
 try:
     from gp_chat import config
     from gp_chat import state_manager
@@ -17,6 +15,22 @@ except ImportError:
 from .azure_common_types import AzureModeResult, AzureUsageMetadata
 from .azure_responses_router import _build_async_client, async_generate_response, async_stream_response
 from .azure_runtime import AzureRuntime
+
+
+def _safe_json_loads(raw_text: str) -> dict[str, Any]:
+    """Safely parse JSON response from LLM, stripping potential markdown fences."""
+    clean_text = raw_text.strip()
+    if clean_text.startswith("```"):
+        lines = clean_text.split("\n")
+        if len(lines) >= 3:
+            clean_text = "\n".join(lines[1:-1]).strip()
+        else:
+            clean_text = clean_text.replace("```json", "").replace("```", "").strip()
+    start_idx = clean_text.find("{")
+    end_idx = clean_text.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
+        clean_text = clean_text[start_idx : end_idx + 1]
+    return json.loads(clean_text)
 
 
 def _run_coroutine(coro):
@@ -83,7 +97,7 @@ async def _run_async_orchestrated_generation(
             )
             plan_text = planner_result.text.strip()
             if plan_text:
-                plan_data = json.loads(plan_text)
+                plan_data = _safe_json_loads(plan_text)
         except Exception as e:
             state_manager.add_debug_log(f"[{log_prefix} Orchestrator] Phase 1 planning error: {e}")
             plan_data = {"needs_parallel_subtasks": False, "plan_summary": "Direct generation", "subtasks": []}

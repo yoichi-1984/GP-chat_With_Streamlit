@@ -635,7 +635,8 @@ sequenceDiagram
 ### 9.1 GPT-5.6 / GPT-6 専用ハイブリッド・オーケストレーター仕様 (`azure_deep_orchestrator.py`)
 1. **目的**: コンテキストが重い状態での高推論（`effort in ("high", "deep")`）におけるゲートウェイタイムアウト（504）を回避し、OpenAI Python SDK 3.x の新通信基盤 `httpx2`（HTTP/2 多重化）を最大限に活用。
 2. **Phase 1: タスク分解 (Planner)**:
-   - 選択中のモデル（`gpt-5.6` または `gpt-6`）を `reasoning_effort="low"` かつ JSON Schema で呼び出し、独立して並行処理可能なサブタスクに分解。短文・単一質問時は Phase 3 へ Early Exit。
+   - 選択中のモデル（`gpt-5.6` または `gpt-6`）を `reasoning_effort="low"` かつ JSON Schema で呼び出し、独立して並行処理可能なサブタスクに分解。
+   - `_safe_json_loads` により、モデル応答にマークダウンコードブロック（```json）や前後の解説文が含まれる場合でも確実に抽出しパース。短文・単一質問時やパース失敗時は Phase 3 へ Early Exit。
 3. **Phase 2: サブタスク並行実行 (HTTP/2 多重化)**:
    - `asyncio.Semaphore(AZURE_DEEP_MAX_CONCURRENCY)`（デフォルト 3）で並行数を制御しながら、単一の TCP/TLS 接続上で `httpx2` による HTTP/2 多重化 API コールを同時に送信し高速回収。
    - サブタスク失敗時はベストエフォート型としてログ記録（`state_manager.add_debug_log`）しつつ Phase 3 に引き継ぐ。
@@ -724,6 +725,11 @@ graph LR
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-09-05**
+  * 第三者レビュー & 堅牢化検証 (/review):
+    * `azure_deep_orchestrator.py` のタスク分解（Phase 1）において、マークダウンコードブロックや前後の解説文が混入した場合でも確実に JSON を抽出・復元する `_safe_json_loads` を実装。
+    * 不要な `import streamlit as st` の削除、構文・型チェックおよび Pylint 静的解析（10.00/10 達成）の実施。
+    * LF 改行コードの統一および Windows 環境における文字化け・エンコーディング例外の予防措置を確認。
 * **2026-09-05**
   * GPT-5.6 / GPT-6 専用 HTTPX2並行・細切れハイブリッドオーケストレーターの導入:
     * `pyproject.toml` の `openai` 依存を `>=3.0.0` へ上限解除・更新し、`httpx2>=0.1.0` および `h2>=4.1.0` を追加。
