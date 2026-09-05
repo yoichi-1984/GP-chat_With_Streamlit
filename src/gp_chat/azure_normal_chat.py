@@ -3,8 +3,10 @@ from __future__ import annotations
 import streamlit as st
 
 try:
+    from gp_chat import config
     from gp_chat import state_manager
 except ImportError:
+    import config
     import state_manager
 
 from .azure_common_types import AzureModeResult
@@ -36,7 +38,7 @@ def run_normal_generation(
     thought_placeholder,
     model_id: str | None = None,
 ) -> AzureModeResult:
-    is_fallback = (model_id not in ("gpt-5.3-codex", "gpt-5.6"))
+    is_fallback = (model_id not in config.AZURE_DIRECT_MODELS)
     log_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
     state_manager.add_debug_log(f"[{log_prefix} Normal] Starting generation.")
     thought_status.update(label=_thinking_label(is_special_mode, is_fallback, model_id), state="running", expanded=False)
@@ -46,7 +48,7 @@ def run_normal_generation(
     latest_usage = None
     final_grounding = None
 
-    is_reasoning = model_id and ("5.6" in model_id or "o1" in model_id or "o3" in model_id)
+    is_reasoning = model_id and ("5.6" in model_id or "6" in model_id or "o1" in model_id or "o3" in model_id)
     passed_effort = effort if is_reasoning else None
 
     for chunk in stream_response(

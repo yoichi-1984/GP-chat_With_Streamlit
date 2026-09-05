@@ -177,7 +177,8 @@ def _build_request_kwargs(
         "max_output_tokens": max_output_tokens,
         "stream": stream,
     }
-    if temperature is not None and reasoning_effort is None:
+    is_reasoning_model = any(token in runtime.deployment.lower() for token in ("5.6", "6", "o1", "o3"))
+    if not is_reasoning_model and temperature is not None and reasoning_effort is None:
         request_kwargs["temperature"] = temperature
     if reasoning_effort is not None:
         request_kwargs["extra_body"] = {"reasoning": {"effort": reasoning_effort}}

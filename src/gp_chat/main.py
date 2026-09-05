@@ -270,7 +270,7 @@ def _send_ai_usage_log(current_usage, model_id, project_id, location):
     if not current_usage:
         return
     # gpt-5.3-codex, gpt-5.6 または Azureルート（フォールバック含む）を使用した場合は GCP Logging への送信をスキップ
-    if model_id in ("gpt-5.3-codex", "gpt-5.6") or current_usage.get("llm_route") in ("azure_fallback", "azure_direct"):
+    if model_id in config.AZURE_DIRECT_MODELS or current_usage.get("llm_route") in ("azure_fallback", "azure_direct"):
         return
     cloud_logging_utils.write_ai_usage_log(
         current_usage=current_usage,
@@ -394,7 +394,7 @@ def run_chatbot_app():
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
-    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.7-flash"))
+    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.8-flash"))
     azure_rt = azure_runtime.load_azure_runtime_from_env(
         bootstrap_env_path=selected_env_file,
         logger=state_manager.add_debug_log,
@@ -405,6 +405,8 @@ def run_chatbot_app():
             azure_rt = dataclasses.replace(azure_rt, deployment=azure_rt.codex_deployment)
         elif model_id == "gpt-5.6":
             azure_rt = dataclasses.replace(azure_rt, deployment=azure_rt.sol_deployment)
+        elif model_id == "gpt-6":  # ← 追加
+            azure_rt = dataclasses.replace(azure_rt, deployment=azure_rt.gpt6_deployment)
     fault_injection_cfg = azure_fault_injection.load_fault_injection_config()
     
     INPUT_LIMIT = 1000000
@@ -842,7 +844,7 @@ def run_chatbot_app():
             used_azure_fallback = False
             azure_retry_system_instruction = ""
             forced_mode_exception = None
-            is_azure_direct_model = (model_id in ("gpt-5.3-codex", "gpt-5.6"))
+            is_azure_direct_model = (model_id in config.AZURE_DIRECT_MODELS)
             if is_azure_direct_model:
                 state_manager.add_debug_log(
                     f"[Azure Route] Forcing direct Azure branch for model={model_id}.",

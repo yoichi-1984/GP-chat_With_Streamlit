@@ -5,6 +5,7 @@ import glob
 import json
 import os
 import re
+import dataclasses
 
 import streamlit as st
 
@@ -71,14 +72,20 @@ def generate_chat_title(messages, runtime: AzureRuntime) -> str:
             "Return only the title text, no quotes, no markdown.\n\n"
             f"Conversation:\n{conversation_text}"
         )
+        
+        # タイトル生成用として、高速な codex デプロイメントに一時差し替え
+        title_runtime = dataclasses.replace(
+            runtime,
+            deployment=runtime.codex_deployment or runtime.deployment
+        )
         result = azure_responses_router.generate_response(
-            runtime=runtime,
+            runtime=title_runtime,  # ← 差し替えた runtime を使用
             input_messages=[
                 {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
             ],
             instructions="You create concise Japanese chat titles.",
-            max_output_tokens=128,
-            temperature=0.1,
+            max_output_tokens=512,   # 15〜20文字なので64トークンで十分
+            reasoning_effort="low", # 推論対応なら最小化
         )
         title = (result.text or "").strip()
         if not title:
