@@ -679,5 +679,5 @@ Marp の設計思想を取り入れた、PowerPoint ファイル（`.pptx`）の
 - **開発者**: **Yoichi-1984**
 - **連絡先**: [yoichi.1984.engineer@gmail.com](mailto:yoichi.1984.engineer@gmail.com)
 - **GitHub**: [yoichi-1984](https://github.com/yoichi-1984)
-- **技術解説記事**: [Note 記事一覧](https://note.com/yoichi_1984xx/n/n3c95602b011c)
+- **技術解説記事**: [Note 記事一覧](https://note.com/yoichi_1984xx)
 
