@@ -3,9 +3,11 @@ from __future__ import annotations
 try:
     from gp_chat import config
     from gp_chat import state_manager
+    from gp_chat import utils
 except ImportError:
     import config
     import state_manager
+    import utils
 
 from .azure_common_types import AzureModeResult
 from .azure_responses_router import stream_response
@@ -87,15 +89,15 @@ def run_normal_generation(
                 state_manager.add_debug_log(f"[Azure Normal] Queries detected: {queries}")
                 for query in queries:
                     full_thought_log += f"\n\n**Action (Azure Search):** `{query}`\n\n"
-                    thought_placeholder.markdown(full_thought_log)
+                    thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
         if chunk.thought_delta and _thinking_enabled(effort):
             full_thought_log += chunk.thought_delta
-            thought_placeholder.markdown(full_thought_log)
+            thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
         elif chunk.text_delta:
             full_response += chunk.text_delta
-            text_placeholder.markdown(full_response + "▌")
+            text_placeholder.markdown(utils.format_latex_delimiters(full_response) + "▌")
 
-    text_placeholder.markdown(full_response)
+    text_placeholder.markdown(utils.format_latex_delimiters(full_response))
     finished_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
     if full_thought_log:
         thought_status.update(label=f"{finished_prefix} finished thinking.", state="complete", expanded=False)

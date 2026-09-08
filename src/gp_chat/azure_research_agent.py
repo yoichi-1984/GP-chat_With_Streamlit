@@ -7,8 +7,10 @@ import streamlit as st
 
 try:
     from gp_chat import state_manager
+    from gp_chat import utils
 except ImportError:
     import state_manager
+    import utils
 
 from .azure_common_types import AzureModeResult, AzureUsageMetadata
 from .azure_responses_router import generate_response, stream_response
@@ -226,11 +228,11 @@ def run_deep_research(
             add_grounding(chunk.grounding_metadata)
         if chunk.thought_delta:
             full_thought_log += chunk.thought_delta
-            thought_placeholder.markdown(full_thought_log)
+            thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
         elif chunk.text_delta:
             full_response += chunk.text_delta
-            text_placeholder.markdown(full_response + "▌")
-    text_placeholder.markdown(full_response)
+            text_placeholder.markdown(utils.format_latex_delimiters(full_response) + "▌")
+    text_placeholder.markdown(utils.format_latex_delimiters(full_response))
     add_usage(synth_usage)
     thought_status.update(label="Azure Deep Research finished.", state="complete", expanded=False)
 

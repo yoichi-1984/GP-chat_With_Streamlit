@@ -660,8 +660,8 @@ def run_chatbot_app():
             with st.chat_message(msg["role"]):
                 if msg["role"] == "assistant" and msg.get("thought_log"):
                     with st.expander("🧠 思考プロセス (Thinking Process)", expanded=False):
-                        st.markdown(msg["thought_log"])
-                st.markdown(msg["content"])      
+                        st.markdown(utils.format_latex_delimiters(msg["thought_log"]))
+                st.markdown(utils.format_latex_delimiters(msg["content"]))      
                 # --- PowerPointダウンロードボタン表示ロジック ---
                 if "pptx_path" in msg and msg["pptx_path"]:
                     pptx_path = msg["pptx_path"]
@@ -729,7 +729,7 @@ def run_chatbot_app():
                         c_copy, c_branch = st.columns([1, 1])
                         with c_copy:
                             if st.button("📋 Markdownをコピー", key=f"copy_md_{i}", help="この返答をMarkdown形式でクリップボードにコピーします"):
-                                if utils.copy_to_clipboard(msg.get("content", "")):
+                                if utils.copy_to_clipboard(utils.format_latex_delimiters(msg.get("content", ""))):
                                     st.toast("📋 クリップボードにMarkdownをコピーしました", icon="✅")
                                 else:
                                     st.error("クリップボードへのコピーに失敗しました")
@@ -1000,7 +1000,7 @@ def run_chatbot_app():
                             state_manager.add_debug_log(f"[Report Agent] PPTX generation failed: {repr(e)}\n{tb_str}", "error")
                             raise
                             
-                        text_placeholder.markdown(full_response)
+                        text_placeholder.markdown(utils.format_latex_delimiters(full_response))
                         mode_llm_meta = {
                             "llm_route": _report_metadata.get("llm_route"),
                             "llm_retry_count": _report_metadata.get("llm_retry_count", 0),
@@ -1074,17 +1074,17 @@ def run_chatbot_app():
                                 for query in queries:
                                     action_text = f"\n\n🔍 **Action (Google Search):** `{query}`\n\n"
                                     full_thought_log += action_text
-                                    thought_placeholder.markdown(full_thought_log)
+                                    thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
 
                         if chunk.thought_delta:
                             full_thought_log += chunk.thought_delta
-                            thought_placeholder.markdown(full_thought_log)
+                            thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
                         elif chunk.text_delta:
                             full_response += chunk.text_delta
-                            text_placeholder.markdown(full_response + "▌")
+                            text_placeholder.markdown(utils.format_latex_delimiters(full_response) + "▌")
                         
                         
-                    text_placeholder.markdown(full_response)
+                    text_placeholder.markdown(utils.format_latex_delimiters(full_response))
                     
                     if not full_thought_log:
                         thought_area_container.empty()

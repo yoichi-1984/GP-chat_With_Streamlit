@@ -152,11 +152,12 @@ gp-chat/
   - `class UITexts`: UI上に表示する全静的テキストを管理するクラス。
 
 #### ⑤ `src/gp_chat/utils.py`
-- **責務**: ファイルのマルチモーダルパース、プロンプトYAMLのロード、Gemini API用の `types.Content` および `Part` リストの構築、OSクリップボードコピー連携。
+- **責務**: ファイルのマルチモーダルパース、プロンプトYAMLのロード、Gemini API用の `types.Content` および `Part` リストの構築、OSクリップボードコピー連携、LaTeX数式デリミタ正規化。
 - **主要関数**:
   - `copy_to_clipboard(text: str) -> bool`: Windows クリップボード (`win32clipboard`, `win32con.CF_UNICODETEXT`) を介して指定文字列を安全にコピー。
   - `load_prompts() -> dict`: `prompts/prompts.yaml`（不在時はパッケージ内デフォルト）をロードして辞書化。
   - `save_prompts(prompts: dict) -> None`: `prompts/prompts.yaml` にプロンプト設定を永続化。
+  - `format_latex_delimiters(text: str) -> str`: コードブロックやインラインコードを安全に保護した上で、`\(` / `\)` を `$`、`\[` / `\]` や行中 `$$` を独立行 `$$` に正規化し、Streamlit (KaTeX) での正常表示を保証。
   - `parse_file(uploaded_file) -> tuple[str, Any]`: アップロードファイル（画像, PDF, Word, Excel, PPT, テキスト）をパースし、`(mime_type, data)` を返す。
   - `_extract_docx(file_bytes: bytes) -> str`: `python-docx` で全段落テキストを抽出。
   - `_extract_excel(file_bytes: bytes, filename: str) -> str`: `python-calamine`（不在時 `openpyxl`）で全シートを読み込み、Markdown テーブル形式の文字列に変換。
@@ -589,6 +590,24 @@ AZURE_DEEP_PLANNER_SCHEMA = {
    - チャット履歴描画ループにおいて、`msg["role"] == "assistant"` かつ `msg.get("thought_log")` が存在する場合、回答本文の上部に `st.expander("🧠 思考プロセス (Thinking Process)", expanded=False)` を描画。
    - 初期状態は折りたたまれており、回答本文の視認性を妨げない。ユーザーがクリックした際のみ展開され、Phase 1〜3 の思考過程・サブタスク収集結果が Markdown 形式で表示される。
 
+### 5.5 LaTeX数式レンダリング & デリミタ正規化仕様
+1. **背景と課題**:
+   - Streamlit の `st.markdown()` は内部で KaTeX (`remark-math`) を使用しており、`$`（インライン）および独立行の `$$`（ディスプレイ）のみをデリミタとして解釈する。
+   - 一方、LLM（Gemini / GPT）は標準で `\(` / `\)` や `\[` / `\]`、あるいは前後に改行のない埋め込み `$$` を出力することが多く、そのままでは数式としてレンダリングされずに生の構文文字列が表示崩れを起こす。
+2. **自動正規化パイプライン (`utils.format_latex_delimiters`)**:
+   - 描画直前に以下の多段階フィルターを通過させる：
+     1. **コードブロックの完全保護**: Markdown のフェンスコードブロック（```` ```...``` ````, `~~~...~~~`）およびインラインコード（`` `...` ``）を一時プレースホルダーに退避し、コード内の記号（`\(` や `\[` 等）の誤変換を防止。
+     2. **ディスプレイ数式変換**: `\[ ... \]` を `\n\n$$\n...\n$$\n\n` に変換。
+     3. **独立行化補正**: 行中に埋め込まれた `$$...$$` の前後に改行を補正。
+     4. **インライン数式変換**: `\( ... \)` を `$ ... $` に変換。
+     5. **コードブロックの復元**: 退避しておいたコードブロックを元の位置にリストア。
+3. **適用範囲**:
+   - チャット履歴描画ループ（回答本文および思考プロセスアコーディオン）。
+   - 全エージェント（通常、Azure、Deep Reasoning、徹底調査等）のリアルタイムストリーミング一時描画領域（`text_placeholder`, `thought_placeholder`）。
+   - 「📋 Markdownをコピー」機能（他ツールでの数式互換性向上）。
+4. **ユーザー設定との非干渉（プロンプト非依存設計）**:
+   - `prompts/prompts.yaml` はユーザー自身がUI等を通じてカスタマイズ・編集する領域であるため、プロンプト本文への制約追加を行わず、描画層（`utils.format_latex_delimiters`）がモデルの出力を自動吸収・正規化するステートレスな設計を採用。これにより、既存のプロンプト資産やユーザーの独自設定に一切影響を与えることなく、高いレンダリング互換性を実現。
+
 ---
 
 ## 第6章: コンテキスト構築 & マルチモーダルパースパイプライン (Context Materialization & Multimodal Parsing)
@@ -987,6 +1006,14 @@ graph LR
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-09-08 / 2026-09-09**
+  * AI記述エリアにおけるLaTeX数式レンダリング最適化 (KaTeX対応 & デリミタ自動正規化):
+    * Streamlit (`st.markdown`) 内の KaTeX パーサーが `$` / `$$` のみをサポートし、LLM標準の `\(` / `\)` や `\[` / `\]`、改行なし埋め込み `$$` を解釈できず生テキスト表示される問題を解消。
+    * `src/gp_chat/utils.py` に `format_latex_delimiters` を実装。コードブロック（```` ```...``` ````, `` `...` ``）を完全保護した上で、`\[` / `\]` を独立行 `$$`、`\(` / `\)` を `$` に正規化する安全な変換パイプラインを確立。
+    * `main.py`、`azure_normal_chat.py`、`azure_deep_orchestrator.py`、`azure_research_agent.py`、`azure_reasoning_agent.py`、`reasoning_agent.py`、`research_agent.py` の全描画部（履歴・ストリーミング・思考ログ・Markdownコピー）に正規化処理を適用。
+    * ユーザーによるプロンプトカスタマイズ資産との競合を防ぐため、`prompts.yaml` は変更せず、描画層（`utils.format_latex_delimiters`）がモデルの出力を自動吸収・正規化するステートレス設計を採用。
+    * `tests/test_latex_formatter.py` を新設し、インライン・ディスプレイ・コードブロック保護・通貨記号共存等の10件の網羅的単体テスト（Pylint 10.00/10）を配備。
+    * 第2章（utils.py責務一覧）および第5章（5.5節）に仕様を追記。
 * **2026-09-05**
   * システム設計仕様書 (software-sheet.md) の完全最新化:
     * アプリケーションの直近の全アップデート（GPT-6対応、httpx2によるHTTP/2通信基盤、GPT-5.6/6高推論限定のAPI並行処理オーケストレーター、Gemini 3.8 Flash対応、思考プロセスの折りたたみ永続化、全依存関係完全固定）を仕様書全体（第1章〜第13章）に整合・反映。

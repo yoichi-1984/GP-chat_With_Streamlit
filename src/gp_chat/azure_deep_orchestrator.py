@@ -8,9 +8,11 @@ from typing import Any
 try:
     from gp_chat import config
     from gp_chat import state_manager
+    from gp_chat import utils
 except ImportError:
     import config
     import state_manager
+    import utils
 
 from .azure_common_types import AzureModeResult, AzureUsageMetadata
 from .azure_responses_router import _build_async_client, async_generate_response, async_stream_response
@@ -242,15 +244,15 @@ async def _run_async_orchestrated_generation(
                 queries = chunk.grounding_metadata.get("queries", [])
                 for q in queries:
                     full_thought_log += f"\n\n**Action (Azure Search):** `{q}`\n\n"
-                    thought_placeholder.markdown(full_thought_log)
+                    thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
             if chunk.thought_delta:
                 full_thought_log += chunk.thought_delta
-                thought_placeholder.markdown(full_thought_log)
+                thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
             elif chunk.text_delta:
                 full_response += chunk.text_delta
-                text_placeholder.markdown(full_response + "▌")
+                text_placeholder.markdown(utils.format_latex_delimiters(full_response) + "▌")
 
-        text_placeholder.markdown(full_response)
+        text_placeholder.markdown(utils.format_latex_delimiters(full_response))
         finished_prefix = "Azure fallback" if is_fallback else f"Azure ({model_id})"
         thought_status.update(
             label=f"{finished_prefix} finished thinking.",

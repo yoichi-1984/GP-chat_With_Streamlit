@@ -7,9 +7,11 @@ from google.genai import types
 try:
     from gp_chat import state_manager
     from gp_chat import llm_router
+    from gp_chat import utils
 except ImportError:
     import state_manager
     import llm_router
+    import utils
 
 def run_deep_research(client, model_id, gen_config, chat_contents, system_instruction, 
                        text_placeholder, thought_status, thought_placeholder):
@@ -266,13 +268,13 @@ def run_deep_research(client, model_id, gen_config, chat_contents, system_instru
 
                 if chunk.thought_delta:
                     full_thought_log += chunk.thought_delta
-                    thought_placeholder.markdown(full_thought_log)
+                    thought_placeholder.markdown(utils.format_latex_delimiters(full_thought_log))
                 elif chunk.text_delta:
                     full_response += chunk.text_delta
-                    text_placeholder.markdown(full_response + "▌")
+                    text_placeholder.markdown(utils.format_latex_delimiters(full_response) + "▌")
                 continue
 
-        text_placeholder.markdown(full_response)
+        text_placeholder.markdown(utils.format_latex_delimiters(full_response))
         
         add_usage(synth_usage)
         

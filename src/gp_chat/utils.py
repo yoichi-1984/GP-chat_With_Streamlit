@@ -720,4 +720,69 @@ def copy_to_clipboard(text: str) -> bool:
         return True
     except Exception as e:
         state_manager.add_debug_log(f"Clipboard copy failed: {e}", "warning")
-        return False
+        return False
+
+
+def format_latex_delimiters(text: str) -> str:
+    """Markdownテキスト内のLaTeX数式デリミタをStreamlit(KaTeX)互換形式に正規化する。
+
+    コードブロック(```...```)やインラインコード(`...`)内のテキストを保護した上で、
+    以下の変換を行う:
+    1. ディスプレイ数式: \\[ ... \\] -> \\n\\n$$\\n...\\n$$\\n\\n
+    2. インライン数式: \\( ... \\) -> $...$
+    3. 行中に埋め込まれた $$...$$ を独立行形式に整形
+
+    Args:
+        text: 変換前のMarkdown文字列。
+
+    Returns:
+        str: KaTeX互換に正規化されたMarkdown文字列。
+    """
+    if not text or not isinstance(text, str):
+        return "" if text is None else str(text)
+
+    protected_blocks = []
+
+    def _save_block(match):
+        protected_blocks.append(match.group(0))
+        return f"__LATEX_PROTECTED_BLOCK_{len(protected_blocks) - 1}__"
+
+    # 1. フェンスコードブロック (```...``` や ~~~...~~~) を保護
+    pattern_fence = re.compile(r"(```[\s\S]*?```|~~~[\s\S]*?~~~)")
+    processed = pattern_fence.sub(_save_block, text)
+
+    # 2. インラインコード (`...`) を保護
+    pattern_inline_code = re.compile(r"(`[^`\n]+`)")
+    processed = pattern_inline_code.sub(_save_block, processed)
+
+    # 3. ディスプレイ数式 \\[ ... \\] を \n\n$$\n...\n$$\n\n に変換
+    def _replace_display(match):
+        inner = match.group(1).strip()
+        return f"\n\n$$\n{inner}\n$$\n\n"
+
+    pattern_display = re.compile(r"\\\[([\s\S]*?)\\\]")
+    processed = pattern_display.sub(_replace_display, processed)
+
+    # 4. 行中に埋め込まれた $$...$$ を独立行形式に整形
+    # 前後が改行でない $$...$$ を見つけて改行を補う
+    pattern_inline_double = re.compile(r"(?<!\n)\$\$([^\n$]+?)\$\$(?!\n)")
+    processed = pattern_inline_double.sub(
+        lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n",
+        processed,
+    )
+
+    # 5. インライン数式 \\( ... \\) を $...$ に変換
+    def _replace_inline(match):
+        inner = match.group(1).strip()
+        return f"${inner}$"
+
+    pattern_inline = re.compile(r"\\\(([\s\S]*?)\\\)")
+    processed = pattern_inline.sub(_replace_inline, processed)
+
+    # 6. 保護したコードブロックを復元
+    for i, block in enumerate(protected_blocks):
+        placeholder = f"__LATEX_PROTECTED_BLOCK_{i}__"
+        processed = processed.replace(placeholder, block)
+
+    return processed
+
