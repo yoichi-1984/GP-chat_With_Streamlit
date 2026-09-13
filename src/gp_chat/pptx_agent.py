@@ -86,6 +86,14 @@ class SlideNode(pydantic.BaseModel):
         None,
         description="スライドのキーポイント（KPI数値、重要な矢印、強調カード等）のみに適用するアクセントカラーの16進数カラーコード（例: '#FF2A2A', '#00D2D2'）。背景色や通常テキストと高いコントラスト（比）を持つ明るい色を選んでください。通常時はNoneで構いません。"
     )
+    category_badge: Optional[str] = pydantic.Field(
+        None,
+        description="スライド上部に表示するカテゴリ・章の英語または日本語バッジ（例: 'BACKGROUND & CHALLENGES', 'ARCHITECTURE', 'PERFORMANCE' 等）。"
+    )
+    lead_sentence: Optional[str] = pydantic.Field(
+        None,
+        description="スライドタイトル直下のハイライトバナーに表示する1〜2行のキーメッセージ・結論リード文。"
+    )
     coverage_refs: List[str] = pydantic.Field(
         default_factory=list,
         description=(
@@ -892,52 +900,119 @@ def hex_to_rgb(hex_str: str) -> RGBColor:
 
 def _resolve_theme_colors(theme: str, accent_hex: Optional[str] = None) -> Dict[str, RGBColor]:
     themes = {
+        "corporate": {
+            "bg": RGBColor(0xf8, 0xfa, 0xfc),          # Slate 50
+            "primary": RGBColor(0x0f, 0x17, 0x2a),     # Slate 900
+            "text": RGBColor(0x33, 0x41, 0x55),        # Slate 700
+            "sub_text": RGBColor(0x64, 0x74, 0x8b),    # Slate 500
+            "card_bg": RGBColor(0xff, 0xff, 0xff),     # Pure White
+            "card_border": RGBColor(0xe2, 0xe8, 0xf0), # Slate 200
+            "banner_bg": RGBColor(0xf0, 0xf9, 0xff),   # Sky 50
+            "badge_bg": RGBColor(0xe0, 0xf2, 0xfe),    # Sky 100
+            "badge_text": RGBColor(0x03, 0x69, 0xa1),  # Sky 700
+            "accent": RGBColor(0x02, 0x84, 0xc7),      # Sky 600
+            "accent_light": RGBColor(0xba, 0xe6, 0xfd),# Sky 200
+            "accent_text": RGBColor(0xff, 0xff, 0xff),
+            "positive": RGBColor(0x05, 0x96, 0x69),    # Emerald 600
+            "positive_bg": RGBColor(0xec, 0xfd, 0xf5), # Emerald 50
+            "warning": RGBColor(0xd9, 0x77, 0x06),     # Amber 600
+            "warning_bg": RGBColor(0xff, 0xfb, 0xeb),  # Amber 50
+        },
         "light": {
             "bg": RGBColor(0xff, 0xff, 0xff),
-            "text": RGBColor(0x11, 0x18, 0x27),
+            "primary": RGBColor(0x1e, 0x29, 0x3b),
+            "text": RGBColor(0x33, 0x41, 0x55),
             "sub_text": RGBColor(0x64, 0x74, 0x8b),
             "card_bg": RGBColor(0xf8, 0xfa, 0xfc),
-            "accent": RGBColor(0x1e, 0x3b, 0x8a)
+            "card_border": RGBColor(0xe2, 0xe8, 0xf0),
+            "banner_bg": RGBColor(0xf1, 0xf5, 0xf9),
+            "badge_bg": RGBColor(0xe2, 0xe8, 0xf0),
+            "badge_text": RGBColor(0x1e, 0x3a, 0x8a),
+            "accent": RGBColor(0x1e, 0x3a, 0x8a),
+            "accent_light": RGBColor(0xbf, 0xdb, 0xfe),
+            "accent_text": RGBColor(0xff, 0xff, 0xff),
+            "positive": RGBColor(0x10, 0xb9, 0x81),
+            "positive_bg": RGBColor(0xec, 0xfd, 0xf5),
+            "warning": RGBColor(0xf5, 0x9e, 0x0b),
+            "warning_bg": RGBColor(0xff, 0xfb, 0xeb),
         },
         "dark": {
-            "bg": RGBColor(0x0f, 0x17, 0x2a),
-            "text": RGBColor(0xf8, 0xfa, 0xfc),
-            "sub_text": RGBColor(0x94, 0xa3, 0xb8),
-            "card_bg": RGBColor(0x1e, 0x29, 0x3b),
-            "accent": RGBColor(0x38, 0xbd, 0xf8)
-        },
-        "corporate": {
-            "bg": RGBColor(0xfc, 0xfd, 0xff),
-            "text": RGBColor(0x0f, 0x17, 0x2a),
-            "sub_text": RGBColor(0x47, 0x55, 0x69),
-            "card_bg": RGBColor(0xf1, 0xf5, 0xf9),
-            "accent": RGBColor(0x02, 0x84, 0xc7)
+            "bg": RGBColor(0x0f, 0x17, 0x2a),          # Deep Slate
+            "primary": RGBColor(0xf8, 0xfa, 0xfc),     # Slate 50
+            "text": RGBColor(0xe2, 0xe8, 0xf0),        # Slate 200
+            "sub_text": RGBColor(0x94, 0xa3, 0xb8),    # Slate 400
+            "card_bg": RGBColor(0x1e, 0x29, 0x3b),     # Slate 800
+            "card_border": RGBColor(0x33, 0x41, 0x55), # Slate 700
+            "banner_bg": RGBColor(0x1e, 0x29, 0x3b),
+            "badge_bg": RGBColor(0x03, 0x69, 0xa1),
+            "badge_text": RGBColor(0xe0, 0xf2, 0xfe),
+            "accent": RGBColor(0x38, 0xbd, 0xf8),      # Sky 400
+            "accent_light": RGBColor(0x02, 0x84, 0xc7),
+            "accent_text": RGBColor(0x0f, 0x17, 0x2a),
+            "positive": RGBColor(0x34, 0xd3, 0x99),
+            "positive_bg": RGBColor(0x06, 0x4e, 0x3b),
+            "warning": RGBColor(0xfb, 0xbf, 0x24),
+            "warning_bg": RGBColor(0x78, 0x35, 0x0f),
         },
         "creative": {
-            "bg": RGBColor(0xfd, 0xf2, 0xf8),
-            "text": RGBColor(0x31, 0x12, 0x2f),
-            "sub_text": RGBColor(0x70, 0x30, 0xa0),
+            "bg": RGBColor(0xfd, 0xf2, 0xf8),          # Pink/Rose 50
+            "primary": RGBColor(0x31, 0x12, 0x2f),
+            "text": RGBColor(0x4c, 0x1d, 0x4f),
+            "sub_text": RGBColor(0x86, 0x19, 0x8f),
             "card_bg": RGBColor(0xff, 0xff, 0xff),
-            "accent": RGBColor(0xdb, 0x27, 0x77)
+            "card_border": RGBColor(0xfb, 0xce, 0xe8),
+            "banner_bg": RGBColor(0xfd, 0xe8, 0xf4),
+            "badge_bg": RGBColor(0xfc, 0xe7, 0xf3),
+            "badge_text": RGBColor(0xbe, 0x18, 0x5d),
+            "accent": RGBColor(0xdb, 0x27, 0x77),      # Pink 600
+            "accent_light": RGBColor(0xfb, 0x71, 0x85),
+            "accent_text": RGBColor(0xff, 0xff, 0xff),
+            "positive": RGBColor(0x10, 0xb9, 0x81),
+            "positive_bg": RGBColor(0xec, 0xfd, 0xf5),
+            "warning": RGBColor(0xf5, 0x9e, 0x0b),
+            "warning_bg": RGBColor(0xff, 0xfb, 0xeb),
         },
         "warm": {
-            "bg": RGBColor(0xff, 0xfa, 0xf0),
-            "text": RGBColor(0x27, 0x1a, 0x0c),
+            "bg": RGBColor(0xff, 0xfa, 0xf0),          # Warm White
+            "primary": RGBColor(0x27, 0x1a, 0x0c),
+            "text": RGBColor(0x45, 0x2e, 0x14),
             "sub_text": RGBColor(0x78, 0x35, 0x0f),
-            "card_bg": RGBColor(0xff, 0xf7, 0xed),
-            "accent": RGBColor(0xd9, 0x77, 0x06)
+            "card_bg": RGBColor(0xff, 0xff, 0xff),
+            "card_border": RGBColor(0xfe, 0xd7, 0xaa),
+            "banner_bg": RGBColor(0xff, 0xf7, 0xed),
+            "badge_bg": RGBColor(0xff, 0xed, 0xd5),
+            "badge_text": RGBColor(0xc2, 0x41, 0x0c),
+            "accent": RGBColor(0xea, 0x58, 0x0c),      # Orange 600
+            "accent_light": RGBColor(0xfd, 0xba, 0x74),
+            "accent_text": RGBColor(0xff, 0xff, 0xff),
+            "positive": RGBColor(0x16, 0xa3, 0x4a),
+            "positive_bg": RGBColor(0xf0, 0xfd, 0xf4),
+            "warning": RGBColor(0xd9, 0x77, 0x06),
+            "warning_bg": RGBColor(0xff, 0xfb, 0xeb),
         },
         "cool": {
-            "bg": RGBColor(0xf0, 0xfd, 0xfa),
-            "text": RGBColor(0x04, 0x2f, 0x2e),
-            "sub_text": RGBColor(0x0d, 0x94, 0x88),
+            "bg": RGBColor(0xf0, 0xfd, 0xfa),          # Emerald / Mint 50
+            "primary": RGBColor(0x06, 0x4e, 0x3b),     # Emerald 900
+            "text": RGBColor(0x06, 0x5f, 0x46),        # Emerald 800
+            "sub_text": RGBColor(0x0d, 0x94, 0x88),    # Teal 600
             "card_bg": RGBColor(0xff, 0xff, 0xff),
-            "accent": RGBColor(0x0f, 0x76, 0x6e)
+            "card_border": RGBColor(0xcc, 0xfb, 0xf1),
+            "banner_bg": RGBColor(0xec, 0xfd, 0xf5),
+            "badge_bg": RGBColor(0xd1, 0xfa, 0xe5),
+            "badge_text": RGBColor(0x04, 0x78, 0x57),
+            "accent": RGBColor(0x05, 0x96, 0x69),      # Emerald 600
+            "accent_light": RGBColor(0x6e, 0xe7, 0xb7),
+            "accent_text": RGBColor(0xff, 0xff, 0xff),
+            "positive": RGBColor(0x05, 0x96, 0x69),
+            "positive_bg": RGBColor(0xec, 0xfd, 0xf5),
+            "warning": RGBColor(0xd9, 0x77, 0x06),
+            "warning_bg": RGBColor(0xff, 0xfb, 0xeb),
         }
     }
     cfg = themes.get(theme, themes["corporate"]).copy()
     if accent_hex:
         cfg["accent"] = hex_to_rgb(accent_hex)
+        cfg["accent_light"] = hex_to_rgb(accent_hex)
     return cfg
 
 VISUAL_VARIANTS_BY_STYLE = {
@@ -1062,6 +1137,582 @@ def _split_visual_items(text: str, limit: int = 6) -> List[str]:
     return [item for item in raw_items if item][:limit]
 
 
+def _parse_slide_content_semantics(slide_data: SlideNode) -> Dict[str, Any]:
+    """SlideNode の placeholders やテキストから、インフォグラフィックス描画用の意味構造を抽出する。"""
+    raw_texts = []
+    for ph in slide_data.placeholders:
+        if ph.text_content and ph.text_content.strip():
+            raw_texts.append(ph.text_content.strip())
+    full_text = "\n".join(raw_texts)
+
+    lead = getattr(slide_data, "lead_sentence", None)
+    lines = [ln.strip() for ln in full_text.split("\n") if ln.strip()]
+    if not lead and lines:
+        first_line = lines[0]
+        if not re.match(r"^[\s•\-*・●■0-9]+[.:：)）]", first_line) and len(first_line) <= 120 and (len(lines) > 1 or ":" not in first_line):
+            lead = first_line
+            lines = lines[1:]
+
+    category = getattr(slide_data, "category_badge", None)
+    if not category:
+        vtype = getattr(slide_data, "visual_type", "auto") or "auto"
+        if vtype == "kpi":
+            category = "KEY METRICS"
+        elif vtype == "process":
+            category = "PROCESS & WORKFLOW"
+        elif vtype == "timeline":
+            category = "ROADMAP & TIMELINE"
+        elif vtype == "comparison":
+            category = "EVALUATION & COMPARISON"
+        elif vtype == "risk":
+            category = "RISK ANALYSIS & MITIGATION"
+        elif vtype == "matrix":
+            category = "PRIORITY MATRIX"
+        else:
+            category = "EXECUTIVE SUMMARY"
+
+    items = []
+    for line in lines:
+        cleaned = re.sub(r"^[\s•\-*・●■]+", "", line).strip()
+        cleaned = re.sub(r"^(?:Phase|Step|STEP|フェーズ|ステップ|\d+)[.:：\s]+", "", cleaned).strip()
+        if not cleaned:
+            continue
+        
+        parts = re.split(r"[:：]|(?:\s+-\s+)", cleaned, maxsplit=1)
+        if len(parts) == 2:
+            item_title = parts[0].strip()
+            item_detail = parts[1].strip()
+        else:
+            m_paren = re.match(r"^([^（(]+)[（(]([^）)]+)[）)]$", cleaned)
+            if m_paren:
+                item_title = m_paren.group(1).strip()
+                item_detail = m_paren.group(2).strip()
+            else:
+                item_title = cleaned[:24] if len(cleaned) > 30 else cleaned
+                item_detail = cleaned[24:].strip() if len(cleaned) > 30 else ""
+        
+        number_match = re.search(r"(\+?-?\d+(?:[.,]\d+)*(?:%|％|円|万円|億円|兆円|ドル|\$|件|人|社|日|時間|分|秒|ms|GB|MB|TB|K|M|B|倍)?)(.*)", cleaned, flags=re.IGNORECASE)
+        number_val = ""
+        unit_val = ""
+        if number_match:
+            raw_num = number_match.group(1)
+            u_match = re.search(r"([%％円万円億円兆円ドル\$件人社日時間分秒msGBMBTBKMB倍]+)$", raw_num, flags=re.IGNORECASE)
+            if u_match:
+                unit_val = u_match.group(1)
+                number_val = raw_num[:-len(unit_val)].strip()
+            else:
+                number_val = raw_num
+
+        items.append({
+            "title": item_title,
+            "detail": item_detail,
+            "number": number_val,
+            "unit": unit_val,
+            "raw": cleaned
+        })
+
+    return {
+        "lead": lead or "",
+        "category": category,
+        "items": items
+    }
+
+
+def _render_slide_frame(slide, slide_data: SlideNode, current_index: int, total_slides: int, colors: Dict[str, RGBColor]) -> None:
+    """16:9 スライド全体の洗練された共通フレーム（背景、カテゴリバッジ、タイトル、スライド番号、境界線、フッター）を描画する。"""
+    # 1. スライド背景
+    bg = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(7.5))
+    bg.fill.solid()
+    bg.fill.fore_color.rgb = colors.get("bg", RGBColor(0xf8, 0xfa, 0xfc))
+    bg.line.fill.background()
+
+    semantics = _parse_slide_content_semantics(slide_data)
+
+    # 2. カテゴリバッジ（左上ピルバッジ）
+    category_text = semantics["category"].upper()
+    badge_w = min(max(len(category_text) * Inches(0.12), Inches(1.5)), Inches(3.2))
+    badge = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(0.4), badge_w, Inches(0.28))
+    badge.fill.solid()
+    badge.fill.fore_color.rgb = colors.get("badge_bg", RGBColor(0xe0, 0xf2, 0xfe))
+    badge.line.fill.background()
+    _set_shape_text(badge, category_text, font_size=8.5, bold=True, color=colors.get("badge_text", RGBColor(0x03, 0x69, 0xa1)), align=PP_ALIGN.CENTER)
+
+    # 3. スライドタイトル
+    tx_title = slide.shapes.add_textbox(Inches(0.8), Inches(0.72), Inches(10.2), Inches(0.55))
+    tf_title = tx_title.text_frame
+    tf_title.word_wrap = True
+    tf_title.margin_left = tf_title.margin_top = tf_title.margin_right = tf_title.margin_bottom = 0
+    p_title = tf_title.paragraphs[0]
+    p_title.text = slide_data.title
+    p_title.font.name = "Meiryo"
+    p_title.font.size = Pt(22)
+    p_title.font.bold = True
+    p_title.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+
+    # 4. スライド番号（右上カウンター）
+    tx_num = slide.shapes.add_textbox(Inches(11.2), Inches(0.5), Inches(1.333), Inches(0.4))
+    tf_num = tx_num.text_frame
+    tf_num.word_wrap = False
+    p_num = tf_num.paragraphs[0]
+    p_num.alignment = PP_ALIGN.RIGHT
+    p_num.text = f"{current_index + 1:02d} / {total_slides:02d}"
+    p_num.font.name = "Meiryo"
+    p_num.font.size = Pt(11)
+    p_num.font.bold = True
+    p_num.font.color.rgb = colors.get("sub_text", RGBColor(0x64, 0x74, 0x8b))
+
+    # 5. ヘッダー境界ディバイダー
+    divider = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.8), Inches(1.32), Inches(11.733), Inches(0.015))
+    divider.fill.solid()
+    divider.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7))
+    divider.line.fill.background()
+
+    # 6. フッター
+    foot_line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.8), Inches(7.08), Inches(11.733), Inches(0.01))
+    foot_line.fill.solid()
+    foot_line.fill.fore_color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+    foot_line.line.fill.background()
+
+    tx_foot = slide.shapes.add_textbox(Inches(0.8), Inches(7.12), Inches(11.733), Inches(0.3))
+    tf_foot = tx_foot.text_frame
+    p_foot_left = tf_foot.paragraphs[0]
+    p_foot_left.text = "GP-Chat Executive Presentation  |  Confidential & Proprietary"
+    p_foot_left.font.name = "Meiryo"
+    p_foot_left.font.size = Pt(8.5)
+    p_foot_left.font.color.rgb = colors.get("sub_text", RGBColor(0x94, 0xa3, 0xb8))
+
+
+def _render_lead_banner(slide, lead_text: str, left, top, width, height, colors: Dict[str, RGBColor]) -> None:
+    """スライド上部に結論リード文（キーメッセージ）を提示するハイライトバナーを描画する。"""
+    box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
+    box.fill.solid()
+    box.fill.fore_color.rgb = colors.get("banner_bg", RGBColor(0xf0, 0xf9, 0xff))
+    box.line.color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+    box.line.width = Pt(0.75)
+
+    accent_bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, Inches(0.06), height)
+    accent_bar.fill.solid()
+    accent_bar.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7))
+    accent_bar.line.fill.background()
+
+    tx = slide.shapes.add_textbox(left + Inches(0.18), top, width - Inches(0.3), height)
+    tf = tx.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = tf.margin_top = tf.margin_right = tf.margin_bottom = 0
+    p = tf.paragraphs[0]
+    p.text = lead_text
+    p.font.name = "Meiryo"
+    p.font.size = Pt(11.5)
+    p.font.bold = True
+    p.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+
+
+def _draw_card_grid_native(slide, items: List[dict], left, top, width, height, colors: Dict[str, RGBColor], cols: int = 3) -> None:
+    count = min(len(items), cols)
+    if count == 0:
+        return
+    gap = Inches(0.20)
+    card_w = (width - gap * (count - 1)) / count
+    for idx in range(count):
+        cx = left + (card_w + gap) * idx
+        it = items[idx]
+        
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx, top, card_w, height)
+        card.fill.solid()
+        card.fill.fore_color.rgb = colors.get("card_bg", RGBColor(0xff, 0xff, 0xff))
+        card.line.color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+        card.line.width = Pt(0.75)
+
+        stripe = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx, top, card_w, Inches(0.06))
+        stripe.fill.solid()
+        stripe.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7)) if idx == 0 else colors.get("accent_light", RGBColor(0xba, 0xe6, 0xfd))
+        stripe.line.fill.background()
+
+        tx = slide.shapes.add_textbox(cx + Inches(0.18), top + Inches(0.16), card_w - Inches(0.36), height - Inches(0.28))
+        tf = tx.text_frame
+        tf.word_wrap = True
+        tf.margin_left = tf.margin_top = tf.margin_right = tf.margin_bottom = 0
+
+        p_title = tf.paragraphs[0]
+        p_title.text = it.get("title") or it.get("raw") or f"Point {idx+1}"
+        p_title.font.name = "Meiryo"
+        p_title.font.size = Pt(13)
+        p_title.font.bold = True
+        p_title.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+        p_title.space_after = Pt(8)
+
+        detail = it.get("detail")
+        if detail:
+            p_desc = tf.add_paragraph()
+            p_desc.text = detail
+            p_desc.font.name = "Meiryo"
+            p_desc.font.size = Pt(11)
+            p_desc.font.color.rgb = colors.get("text", RGBColor(0x33, 0x41, 0x55))
+            p_desc.line_spacing = 1.3
+
+
+def _draw_kpi_native(slide, items: List[dict], left, top, width, height, colors: Dict[str, RGBColor]) -> None:
+    count = min(max(len(items), 2), 4)
+    gap = Inches(0.20)
+    card_w = (width - gap * (count - 1)) / count
+    for idx in range(count):
+        cx = left + (card_w + gap) * idx
+        it = items[idx]
+
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx, top, card_w, height)
+        card.fill.solid()
+        card.fill.fore_color.rgb = colors.get("card_bg", RGBColor(0xff, 0xff, 0xff))
+        card.line.color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+        card.line.width = Pt(0.75)
+
+        tx = slide.shapes.add_textbox(cx + Inches(0.15), top + Inches(0.3), card_w - Inches(0.3), height - Inches(0.5))
+        tf = tx.text_frame
+        tf.word_wrap = True
+        tf.margin_left = tf.margin_top = tf.margin_right = tf.margin_bottom = 0
+
+        num_str = it.get("number") or ""
+        unit_str = it.get("unit") or ""
+        if not num_str and not unit_str:
+            num_str = it.get("title") or "100"
+
+        p_num = tf.paragraphs[0]
+        p_num.alignment = PP_ALIGN.CENTER
+        p_num.space_after = Pt(4)
+        
+        r_num = p_num.add_run()
+        r_num.text = num_str
+        r_num.font.name = "Meiryo"
+        r_num.font.size = Pt(36)
+        r_num.font.bold = True
+        r_num.font.color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7))
+
+        if unit_str:
+            r_unit = p_num.add_run()
+            r_unit.text = f" {unit_str}"
+            r_unit.font.name = "Meiryo"
+            r_unit.font.size = Pt(14)
+            r_unit.font.bold = True
+            r_unit.font.color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7))
+
+        p_lbl = tf.add_paragraph()
+        p_lbl.alignment = PP_ALIGN.CENTER
+        p_lbl.text = it.get("title") or "Metric"
+        p_lbl.font.name = "Meiryo"
+        p_lbl.font.size = Pt(12.5)
+        p_lbl.font.bold = True
+        p_lbl.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+        p_lbl.space_after = Pt(8)
+
+        if it.get("detail"):
+            p_dtl = tf.add_paragraph()
+            p_dtl.alignment = PP_ALIGN.CENTER
+            p_dtl.text = it.get("detail")
+            p_dtl.font.name = "Meiryo"
+            p_dtl.font.size = Pt(10)
+            p_dtl.font.color.rgb = colors.get("sub_text", RGBColor(0x64, 0x74, 0x8b))
+
+
+def _draw_process_flow_native(slide, items: List[dict], left, top, width, height, colors: Dict[str, RGBColor]) -> None:
+    count = min(max(len(items), 2), 4)
+    arrow_w = Inches(0.22)
+    gap = Inches(0.12)
+    total_arrow_w = arrow_w * (count - 1)
+    total_gap_w = gap * 2 * (count - 1)
+    card_w = (width - total_arrow_w - total_gap_w) / count
+
+    for idx in range(count):
+        cx = left + (card_w + arrow_w + gap * 2) * idx
+        it = items[idx]
+
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx, top, card_w, height)
+        card.fill.solid()
+        card.fill.fore_color.rgb = colors.get("card_bg", RGBColor(0xff, 0xff, 0xff))
+        card.line.color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+        card.line.width = Pt(0.75)
+
+        badge_w = Inches(0.85)
+        badge_h = Inches(0.32)
+        badge = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx + (card_w - badge_w) / 2, top + Inches(0.15), badge_w, badge_h)
+        badge.fill.solid()
+        badge.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7)) if idx == 0 else colors.get("badge_bg", RGBColor(0xe0, 0xf2, 0xfe))
+        badge.line.fill.background()
+        b_color = colors.get("accent_text", RGBColor(0xff, 0xff, 0xff)) if idx == 0 else colors.get("badge_text", RGBColor(0x03, 0x69, 0xa1))
+        _set_shape_text(badge, f"STEP {idx+1}", font_size=9, bold=True, color=b_color, align=PP_ALIGN.CENTER)
+
+        tx = slide.shapes.add_textbox(cx + Inches(0.12), top + Inches(0.6), card_w - Inches(0.24), height - Inches(0.7))
+        tf = tx.text_frame
+        tf.word_wrap = True
+        tf.margin_left = tf.margin_top = tf.margin_right = tf.margin_bottom = 0
+
+        p_title = tf.paragraphs[0]
+        p_title.text = it.get("title") or f"Phase {idx+1}"
+        p_title.font.name = "Meiryo"
+        p_title.font.size = Pt(12.5)
+        p_title.font.bold = True
+        p_title.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+        p_title.space_after = Pt(6)
+
+        if it.get("detail"):
+            p_desc = tf.add_paragraph()
+            p_desc.text = it.get("detail")
+            p_desc.font.name = "Meiryo"
+            p_desc.font.size = Pt(10.5)
+            p_desc.font.color.rgb = colors.get("text", RGBColor(0x33, 0x41, 0x55))
+            p_desc.line_spacing = 1.25
+
+        if idx < count - 1:
+            ax = cx + card_w + gap
+            ay = top + height / 2 - Inches(0.15)
+            arrow = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, ax, ay, arrow_w, Inches(0.3))
+            arrow.fill.solid()
+            arrow.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7))
+            arrow.line.fill.background()
+
+
+def _draw_timeline_native(slide, items: List[dict], left, top, width, height, colors: Dict[str, RGBColor]) -> None:
+    count = min(max(len(items), 2), 4)
+    line_y = top + Inches(0.5)
+    line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left + Inches(0.2), line_y, width - Inches(0.4), Inches(0.03))
+    line.fill.solid()
+    line.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7))
+    line.line.fill.background()
+
+    step_w = width / count
+    for idx in range(count):
+        it = items[idx]
+        cx = left + step_w * idx
+        
+        node_size = Inches(0.26)
+        nx = cx + step_w / 2 - node_size / 2
+        ny = line_y - node_size / 2 + Inches(0.015)
+        node = slide.shapes.add_shape(MSO_SHAPE.OVAL, nx, ny, node_size, node_size)
+        node.fill.solid()
+        node.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7)) if idx == 0 else colors.get("sub_text", RGBColor(0x64, 0x74, 0x8b))
+        node.line.fill.background()
+        _set_shape_text(node, str(idx + 1), font_size=8.5, bold=True, color=RGBColor(0xff, 0xff, 0xff), align=PP_ALIGN.CENTER)
+
+        card_y = line_y + Inches(0.3)
+        card_h = height - (card_y - top)
+        card_w = step_w - Inches(0.16)
+        card_x = cx + Inches(0.08)
+
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, card_x, card_y, card_w, card_h)
+        card.fill.solid()
+        card.fill.fore_color.rgb = colors.get("card_bg", RGBColor(0xff, 0xff, 0xff))
+        card.line.color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+        card.line.width = Pt(0.75)
+
+        tx = slide.shapes.add_textbox(card_x + Inches(0.12), card_y + Inches(0.15), card_w - Inches(0.24), card_h - Inches(0.25))
+        tf = tx.text_frame
+        tf.word_wrap = True
+        tf.margin_left = tf.margin_top = tf.margin_right = tf.margin_bottom = 0
+
+        p_title = tf.paragraphs[0]
+        p_title.text = it.get("title") or f"Phase {idx+1}"
+        p_title.font.name = "Meiryo"
+        p_title.font.size = Pt(12)
+        p_title.font.bold = True
+        p_title.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+        p_title.space_after = Pt(6)
+
+        if it.get("detail"):
+            p_desc = tf.add_paragraph()
+            p_desc.text = it.get("detail")
+            p_desc.font.name = "Meiryo"
+            p_desc.font.size = Pt(10)
+            p_desc.font.color.rgb = colors.get("text", RGBColor(0x33, 0x41, 0x55))
+            p_desc.line_spacing = 1.25
+
+
+def _draw_pros_cons_native(slide, items: List[dict], left, top, width, height, colors: Dict[str, RGBColor]) -> None:
+    gap = Inches(0.25)
+    col_w = (width - gap) / 2
+    
+    half = max(len(items) // 2, 1)
+    pros_items = items[:half]
+    cons_items = items[half:] or items[:half]
+
+    columns = [
+        ("メリット / 強み (Pros)", pros_items, colors.get("positive", RGBColor(0x05, 0x96, 0x69)), left),
+        ("課題 / 留意点 (Cons)", cons_items, colors.get("warning", RGBColor(0xd9, 0x77, 0x06)), left + col_w + gap)
+    ]
+
+    for col_title, col_its, header_color, cx in columns:
+        header_h = Inches(0.42)
+        header = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx, top, col_w, header_h)
+        header.fill.solid()
+        header.fill.fore_color.rgb = header_color
+        header.line.fill.background()
+        _set_shape_text(header, col_title, font_size=11, bold=True, color=RGBColor(0xff, 0xff, 0xff), align=PP_ALIGN.CENTER)
+
+        card_y = top + header_h + Inches(0.08)
+        card_h = height - header_h - Inches(0.08)
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx, card_y, col_w, card_h)
+        card.fill.solid()
+        card.fill.fore_color.rgb = colors.get("card_bg", RGBColor(0xff, 0xff, 0xff))
+        card.line.color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+        card.line.width = Pt(0.75)
+
+        tx = slide.shapes.add_textbox(cx + Inches(0.18), card_y + Inches(0.18), col_w - Inches(0.36), card_h - Inches(0.32))
+        tf = tx.text_frame
+        tf.word_wrap = True
+        tf.margin_left = tf.margin_top = tf.margin_right = tf.margin_bottom = 0
+
+        for i, it in enumerate(col_its[:4]):
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            p.text = f"• {it.get('title') or it.get('raw')}"
+            p.font.name = "Meiryo"
+            p.font.size = Pt(11)
+            p.font.bold = True
+            p.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+            p.space_after = Pt(2)
+            
+            if it.get("detail"):
+                p_sub = tf.add_paragraph()
+                p_sub.text = f"  {it.get('detail')}"
+                p_sub.font.name = "Meiryo"
+                p_sub.font.size = Pt(10)
+                p_sub.font.color.rgb = colors.get("text", RGBColor(0x33, 0x41, 0x55))
+                p_sub.space_after = Pt(6)
+
+
+def _render_cover_slide_native(slide, presentation_title: str, colors: Dict[str, RGBColor]) -> None:
+    """エグゼクティブ向けプロフェッショナル表紙スライドを描画する。"""
+    bg = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(7.5))
+    bg.fill.solid()
+    bg.fill.fore_color.rgb = colors.get("bg", RGBColor(0xf8, 0xfa, 0xfc))
+    bg.line.fill.background()
+
+    left_stripe = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(0.25), Inches(7.5))
+    left_stripe.fill.solid()
+    left_stripe.fill.fore_color.rgb = colors.get("accent", RGBColor(0x02, 0x84, 0xc7))
+    left_stripe.line.fill.background()
+
+    badge = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(1.2), Inches(1.5), Inches(3.6), Inches(0.36))
+    badge.fill.solid()
+    badge.fill.fore_color.rgb = colors.get("badge_bg", RGBColor(0xe0, 0xf2, 0xfe))
+    badge.line.fill.background()
+    _set_shape_text(badge, "EXECUTIVE PRESENTATION | GP-CHAT", font_size=9.5, bold=True, color=colors.get("badge_text", RGBColor(0x03, 0x69, 0xa1)), align=PP_ALIGN.CENTER)
+
+    tx_title = slide.shapes.add_textbox(Inches(1.2), Inches(2.1), Inches(11.0), Inches(1.8))
+    tf_title = tx_title.text_frame
+    tf_title.word_wrap = True
+    p_title = tf_title.paragraphs[0]
+    p_title.text = presentation_title
+    p_title.font.name = "Meiryo"
+    p_title.font.size = Pt(34)
+    p_title.font.bold = True
+    p_title.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+
+    tx_sub = slide.shapes.add_textbox(Inches(1.2), Inches(4.0), Inches(11.0), Inches(0.7))
+    tf_sub = tx_sub.text_frame
+    tf_sub.word_wrap = True
+    p_sub = tf_sub.paragraphs[0]
+    p_sub.text = "AI-Powered Technical & Strategic Infographic Report"
+    p_sub.font.name = "Meiryo"
+    p_sub.font.size = Pt(15)
+    p_sub.font.color.rgb = colors.get("sub_text", RGBColor(0x64, 0x74, 0x8b))
+
+    divider = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(1.2), Inches(4.85), Inches(10.8), Inches(0.015))
+    divider.fill.solid()
+    divider.fill.fore_color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+    divider.line.fill.background()
+
+    meta_cards = [
+        ("DATE", "2026 Latest Report"),
+        ("AUTHOR", "GP-Chat AI Workstation"),
+        ("STATUS", "Production Quality"),
+    ]
+    card_w = Inches(3.3)
+    card_h = Inches(0.9)
+    gap = Inches(0.45)
+    for idx, (label, val) in enumerate(meta_cards):
+        cx = Inches(1.2) + (card_w + gap) * idx
+        cy = Inches(5.15)
+        card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, cx, cy, card_w, card_h)
+        card.fill.solid()
+        card.fill.fore_color.rgb = colors.get("card_bg", RGBColor(0xff, 0xff, 0xff))
+        card.line.color.rgb = colors.get("card_border", RGBColor(0xe2, 0xe8, 0xf0))
+        card.line.width = Pt(0.75)
+        
+        tx_meta = slide.shapes.add_textbox(cx + Inches(0.18), cy + Inches(0.12), card_w - Inches(0.36), card_h - Inches(0.24))
+        tf_meta = tx_meta.text_frame
+        tf_meta.word_wrap = True
+        p_lbl = tf_meta.paragraphs[0]
+        p_lbl.text = label
+        p_lbl.font.name = "Meiryo"
+        p_lbl.font.size = Pt(8.5)
+        p_lbl.font.bold = True
+        p_lbl.font.color.rgb = colors.get("sub_text", RGBColor(0x64, 0x74, 0x8b))
+
+        p_val = tf_meta.add_paragraph()
+        p_val.text = val
+        p_val.font.name = "Meiryo"
+        p_val.font.size = Pt(11.5)
+        p_val.font.bold = True
+        if label == "STATUS":
+            p_val.font.color.rgb = colors.get("positive", RGBColor(0x05, 0x96, 0x69))
+        else:
+            p_val.font.color.rgb = colors.get("primary", RGBColor(0x0f, 0x17, 0x2a))
+
+
+def render_native_infographic_slide(
+    prs: Presentation,
+    slide_data: SlideNode,
+    font_size_offset: int = 0,
+    current_index: int = 0,
+    total_slides: int = 0,
+    blank_layout = None,
+) -> None:
+    """テンプレートなし（デフォルト）の場合に、16:9の高品質インフォグラフィックススライドを完全自立生成する。"""
+    if blank_layout is None:
+        blank_layout = prs.slide_layouts[6]
+    slide = prs.slides.add_slide(blank_layout)
+    theme = getattr(slide_data, "color_theme", "corporate")
+    accent = getattr(slide_data, "accent_color_hex", None)
+    colors = _resolve_theme_colors(theme, accent)
+
+    # 1. 共通フレーム描画
+    _render_slide_frame(slide, slide_data, current_index, total_slides, colors)
+
+    # 2. セマンティックパース
+    semantics = _parse_slide_content_semantics(slide_data)
+    lead = semantics["lead"]
+    items = semantics["items"]
+
+    # 3. リード文バナー（存在時）
+    content_top = Inches(1.50)
+    content_height = Inches(5.35)
+    if lead:
+        banner_h = Inches(0.55)
+        _render_lead_banner(slide, lead, Inches(0.8), content_top, Inches(11.733), banner_h, colors)
+        content_top += banner_h + Inches(0.18)
+        content_height -= (banner_h + Inches(0.18))
+
+    content_left = Inches(0.8)
+    content_width = Inches(11.733)
+
+    # 4. スタイル判定とインフォグラフィックス描画
+    style = _infer_visual_style(slide_data)
+    variant = getattr(slide_data, "visual_variant", "auto")
+
+    if not items:
+        items = [{"title": slide_data.title, "detail": "詳細情報はありません", "number": "", "unit": "", "raw": ""}]
+
+    if style == "kpi" or variant in ("big_numbers", "metric_cards"):
+        _draw_kpi_native(slide, items, content_left, content_top, content_width, content_height, colors)
+    elif style == "process" or variant in ("chevron_flow", "vertical_flow", "numbered_steps"):
+        _draw_process_flow_native(slide, items, content_left, content_top, content_width, content_height, colors)
+    elif style == "timeline" or variant in ("horizontal_timeline", "milestone_cards"):
+        _draw_timeline_native(slide, items, content_left, content_top, content_width, content_height, colors)
+    elif style == "comparison" or variant in ("pros_cons", "table_compare"):
+        _draw_pros_cons_native(slide, items, content_left, content_top, content_width, content_height, colors)
+    else:
+        cols = 2 if len(items) <= 2 else 3
+        _draw_card_grid_native(slide, items, content_left, content_top, content_width, content_height, colors, cols=cols)
+
+
 def _infer_visual_style(slide_data: SlideNode) -> str:
     requested = getattr(slide_data, "visual_type", "auto") or "auto"
     if requested != "auto":
@@ -1149,7 +1800,7 @@ def _draw_timeline(slide, items: List[str], left, top, width, height):
         marker.fill.fore_color.rgb = _current_colors.get("accent", INFO_GREEN) if idx == 0 else _current_colors.get("sub_text", INFO_GRAY)
         marker.line.fill.background()
         fill_color = _current_colors.get("card_bg", INFO_GREEN_LIGHT)
-        _add_info_box(slide, left + Inches(0.38), y, width - Inches(0.44), row_h - Inches(0.08), item, fill_color, font_size=8.5, bold=idx == 0)
+        _add_info_box(slide, left + Inches(0.38), y, width - Inches(0.44), row_h - Inches(0.08), item, fill_color, font_size=10.5, bold=idx == 0)
 
 
 def _draw_kpi_grid(slide, items: List[str], style: str, left, top, width, height):
@@ -1163,7 +1814,7 @@ def _draw_kpi_grid(slide, items: List[str], style: str, left, top, width, height
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
         col = idx % cols
         row = idx // cols
-        _add_info_box(slide, left + (box_w + gap) * col, top + (box_h + gap) * row, box_w, box_h, item, fill, line_color=None, font_size=8.6, bold=True, text_color=text_color)
+        _add_info_box(slide, left + (box_w + gap) * col, top + (box_h + gap) * row, box_w, box_h, item, fill, line_color=None, font_size=11.5, bold=True, text_color=text_color)
 
 
 def _draw_big_numbers(slide, items: List[str], left, top, width, height):
@@ -1182,14 +1833,14 @@ def _draw_big_numbers(slide, items: List[str], left, top, width, height):
         p_value.text = value[:16]
         p_value.alignment = PP_ALIGN.CENTER
         p_value.font.name = "Meiryo"
-        p_value.font.size = Pt(16)
+        p_value.font.size = Pt(28)
         p_value.font.bold = True
         p_value.font.color.rgb = _current_colors.get("accent", INFO_BLUE)
         p_label = box.text_frame.add_paragraph()
         p_label.text = label[:34]
         p_label.alignment = PP_ALIGN.CENTER
         p_label.font.name = "Meiryo"
-        p_label.font.size = Pt(7.8)
+        p_label.font.size = Pt(11.0)
         p_label.font.color.rgb = _current_colors.get("sub_text", INFO_GRAY)
 
 
@@ -1201,10 +1852,10 @@ def _draw_scorecard(slide, items: List[str], left, top, width, height):
     for idx, item in enumerate(items[:row_count]):
         y = top + row_h * idx
         fill = _current_colors.get("card_bg", INFO_GREEN_LIGHT) if idx % 2 == 0 else _current_colors.get("bg", RGBColor(0xff, 0xff, 0xff))
-        _add_info_box(slide, left, y + Inches(0.03), width, row_h - Inches(0.06), item, fill, line_color=None, font_size=8.4, bold=idx == 0)
+        _add_info_box(slide, left, y + Inches(0.03), width, row_h - Inches(0.06), item, fill, line_color=None, font_size=10.5, bold=idx == 0)
 
 
-def _set_list_text(shape, items: List[str], font_size: float = 8.4):
+def _set_list_text(shape, items: List[str], font_size: float = 10.5):
     shape.text_frame.clear()
     shape.text_frame.word_wrap = True
     shape.text_frame.vertical_anchor = MSO_ANCHOR.TOP
@@ -1236,14 +1887,14 @@ def _draw_pros_cons(slide, items: List[str], left, top, width, height):
     pros_color = _current_colors.get("accent", INFO_GREEN)
     cons_color = _current_colors.get("sub_text", INFO_AMBER)
     
-    _add_info_box(slide, left, top, col_w, Inches(0.34), "Pros", pros_color, line_color=None, font_size=8.6, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
-    _add_info_box(slide, mid + gap, top, col_w, Inches(0.34), "Cons", cons_color, line_color=None, font_size=8.6, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
+    _add_info_box(slide, left, top, col_w, Inches(0.34), "Pros", pros_color, line_color=None, font_size=12.0, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
+    _add_info_box(slide, mid + gap, top, col_w, Inches(0.34), "Cons", cons_color, line_color=None, font_size=12.0, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
     
     fill = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-    left_box = _add_info_box(slide, left, top + Inches(0.44), col_w, height - Inches(0.44), "", fill, line_color=None, font_size=8.4)
-    right_box = _add_info_box(slide, mid + gap, top + Inches(0.44), col_w, height - Inches(0.44), "", fill, line_color=None, font_size=8.4)
-    _set_list_text(left_box, left_items, font_size=9.0)
-    _set_list_text(right_box, right_items, font_size=9.0)
+    left_box = _add_info_box(slide, left, top + Inches(0.44), col_w, height - Inches(0.44), "", fill, line_color=None, font_size=10.5)
+    right_box = _add_info_box(slide, mid + gap, top + Inches(0.44), col_w, height - Inches(0.44), "", fill, line_color=None, font_size=10.5)
+    _set_list_text(left_box, left_items, font_size=10.5)
+    _set_list_text(right_box, right_items, font_size=10.5)
 
 
 def _draw_flow(slide, items: List[str], left, top, width, height):
@@ -1255,7 +1906,7 @@ def _draw_flow(slide, items: List[str], left, top, width, height):
         # 最初だけアクセントカラーで強調（白文字）、他は薄いカード背景
         fill = _current_colors.get("accent", INFO_BLUE) if idx == 0 else _current_colors.get("card_bg", INFO_BLUE_LIGHT)
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
-        _add_info_box(slide, left, y, width, box_h, item, fill, line_color=None, font_size=8.5, bold=True, text_color=text_color)
+        _add_info_box(slide, left, y, width, box_h, item, fill, line_color=None, font_size=11.0, bold=True, text_color=text_color)
         if idx < step_count - 1:
             arrow = slide.shapes.add_shape(MSO_SHAPE.DOWN_ARROW, left + width / 2 - Inches(0.08), y + box_h - Inches(0.02), Inches(0.16), Inches(0.22))
             arrow.fill.solid()
@@ -1280,7 +1931,7 @@ def _draw_chevron_flow(slide, items: List[str], left, top, width, height):
         
         shape.fill.fore_color.rgb = fill
         shape.line.fill.background()
-        _set_shape_text(shape, item, font_size=7.8, bold=True, color=text_color)
+        _set_shape_text(shape, item, font_size=10.5, bold=True, color=text_color)
 
 
 def _draw_phase_bands(slide, items: List[str], left, top, width, height):
@@ -1290,7 +1941,7 @@ def _draw_phase_bands(slide, items: List[str], left, top, width, height):
         item = items[idx] if idx < len(items) else ""
         fill = _current_colors.get("accent", INFO_GREEN) if idx == 0 else _current_colors.get("card_bg", INFO_BLUE_LIGHT)
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
-        _add_info_box(slide, left + Inches(0.12) * idx, top + band_h * idx, width - Inches(0.12) * idx, band_h - Inches(0.08), item, fill, line_color=None, font_size=8.4, bold=idx == 0, text_color=text_color)
+        _add_info_box(slide, left + Inches(0.12) * idx, top + band_h * idx, width - Inches(0.12) * idx, band_h - Inches(0.08), item, fill, line_color=None, font_size=11.0, bold=idx == 0, text_color=text_color)
 
 
 def _draw_matrix(slide, items: List[str], left, top, width, height):
@@ -1315,7 +1966,7 @@ def _draw_matrix(slide, items: List[str], left, top, width, height):
         # 左上（0番目）をアクセントカラー、他をカード背景にする
         fill = _current_colors.get("accent", INFO_BLUE) if idx == 0 else _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
-        _add_info_box(slide, x, y, box_w, box_h, item, fill, line_color=None, font_size=8.0, bold=idx == 0, text_color=text_color)
+        _add_info_box(slide, x, y, box_w, box_h, item, fill, line_color=None, font_size=10.5, bold=idx == 0, text_color=text_color)
 
 
 def _draw_cause_impact_mitigation(slide, items: List[str], left, top, width, height):
@@ -1330,10 +1981,10 @@ def _draw_cause_impact_mitigation(slide, items: List[str], left, top, width, hei
         fill_label = _current_colors.get("accent", INFO_BLUE) if idx == 0 else _current_colors.get("card_bg", INFO_BLUE_LIGHT)
         text_color_label = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
         
-        _add_info_box(slide, left, y, Inches(0.82), box_h, labels[idx], fill_label, line_color=None, font_size=7.2, bold=True, text_color=text_color_label)
+        _add_info_box(slide, left, y, Inches(0.82), box_h, labels[idx], fill_label, line_color=None, font_size=11.0, bold=True, text_color=text_color_label)
         
         fill_text = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-        _add_info_box(slide, left + Inches(0.92), y, width - Inches(0.92), box_h, text, fill_text, line_color=None, font_size=8.0)
+        _add_info_box(slide, left + Inches(0.92), y, width - Inches(0.92), box_h, text, fill_text, line_color=None, font_size=10.5)
 
 
 def _draw_summary_bands(slide, items: List[str], left, top, width, height):
@@ -1353,7 +2004,7 @@ def _draw_summary_bands(slide, items: List[str], left, top, width, height):
             item,
             fill,
             line_color=None,
-            font_size=8.6,
+            font_size=11.0,
             bold=idx == 0,
         )
 
@@ -1370,7 +2021,7 @@ def _draw_pyramid(slide, items: List[str], left, top, width, height):
         # 一番上(idx=0)をアクセントにして他をカード背景にする
         fill = _current_colors.get("accent", INFO_BLUE) if idx == 0 else _current_colors.get("card_bg", INFO_BLUE_LIGHT)
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
-        _add_info_box(slide, x, y, w, level_h - Inches(0.08), item, fill, line_color=None, font_size=8.0, bold=idx == 0, text_color=text_color)
+        _add_info_box(slide, x, y, w, level_h - Inches(0.08), item, fill, line_color=None, font_size=10.5, bold=idx == 0, text_color=text_color)
 
 
 def _draw_horizontal_timeline(slide, items: List[str], left, top, width, height):
@@ -1399,7 +2050,7 @@ def _draw_horizontal_timeline(slide, items: List[str], left, top, width, height)
         fill = accent_color if idx == 0 else _current_colors.get("card_bg", INFO_BLUE_LIGHT)
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
         
-        _add_info_box(slide, left + step_w * idx + Inches(0.03), box_y, step_w - Inches(0.06), box_h, item, fill, line_color=None, font_size=7.6, bold=idx == 0, text_color=text_color)
+        _add_info_box(slide, left + step_w * idx + Inches(0.03), box_y, step_w - Inches(0.06), box_h, item, fill, line_color=None, font_size=10.0, bold=idx == 0, text_color=text_color)
 
 
 def _draw_milestone_cards(slide, items: List[str], left, top, width, height):
@@ -1412,12 +2063,12 @@ def _draw_milestone_cards(slide, items: List[str], left, top, width, height):
         sub_color = _current_colors.get("sub_text", INFO_GRAY)
         
         x = left + (box_w + gap) * idx
-        card = _add_info_box(slide, x, top + Inches(0.2), box_w, height - Inches(0.2), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=7.7, bold=True)
+        card = _add_info_box(slide, x, top + Inches(0.2), box_w, height - Inches(0.2), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=10.5, bold=True)
         badge = slide.shapes.add_shape(MSO_SHAPE.OVAL, x + box_w / 2 - Inches(0.16), top, Inches(0.32), Inches(0.32))
         badge.fill.solid()
         badge.fill.fore_color.rgb = accent_color if idx == 0 else sub_color
         badge.line.fill.background()
-        _set_shape_text(badge, str(idx + 1), font_size=8.5, bold=True, color=RGBColor(0xff, 0xff, 0xff))
+        _set_shape_text(badge, str(idx + 1), font_size=11.0, bold=True, color=RGBColor(0xff, 0xff, 0xff))
 
 
 def _draw_now_next_later(slide, items: List[str], left, top, width, height):
@@ -1431,10 +2082,10 @@ def _draw_now_next_later(slide, items: List[str], left, top, width, height):
         text_color_header = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
         
         x = left + (box_w + gap) * idx
-        _add_info_box(slide, x, top, box_w, Inches(0.34), labels[idx], fill_header, line_color=None, font_size=8.2, bold=True, text_color=text_color_header)
+        _add_info_box(slide, x, top, box_w, Inches(0.34), labels[idx], fill_header, line_color=None, font_size=12.0, bold=True, text_color=text_color_header)
         text = items[idx] if idx < len(items) else ""
         fill_box = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-        _add_info_box(slide, x, top + Inches(0.44), box_w, height - Inches(0.44), text, fill_box, line_color=None, font_size=8.0)
+        _add_info_box(slide, x, top + Inches(0.44), box_w, height - Inches(0.44), text, fill_box, line_color=None, font_size=10.5)
 
 
 def _draw_gantt_roadmap(slide, items: List[str], left, top, width, height):
@@ -1445,7 +2096,7 @@ def _draw_gantt_roadmap(slide, items: List[str], left, top, width, height):
         y = top + row_h * idx
         text = items[idx] if idx < len(items) else ""
         fill_label = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-        _add_info_box(slide, left, y + Inches(0.03), label_w - Inches(0.08), row_h - Inches(0.06), text[:42], fill_label, line_color=None, font_size=7.4)
+        _add_info_box(slide, left, y + Inches(0.03), label_w - Inches(0.08), row_h - Inches(0.06), text[:42], fill_label, line_color=None, font_size=10.0)
         
         # 1番目のガントバーだけアクセントで強調
         fill_bar = _current_colors.get("accent", INFO_BLUE) if idx == 0 else _current_colors.get("sub_text", INFO_BLUE_LIGHT)
@@ -1470,10 +2121,10 @@ def _draw_numbered_steps(slide, items: List[str], left, top, width, height):
         badge.fill.solid()
         badge.fill.fore_color.rgb = accent_color if idx == 0 else sub_color
         badge.line.fill.background()
-        _set_shape_text(badge, str(idx + 1), font_size=8, bold=True, color=RGBColor(0xff, 0xff, 0xff))
+        _set_shape_text(badge, str(idx + 1), font_size=11.0, bold=True, color=RGBColor(0xff, 0xff, 0xff))
         
         fill = _current_colors.get("card_bg", INFO_BLUE_LIGHT)
-        _add_info_box(slide, left + Inches(0.42), y + Inches(0.03), width - Inches(0.42), row_h - Inches(0.06), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=8.0, bold=idx == 0)
+        _add_info_box(slide, left + Inches(0.42), y + Inches(0.03), width - Inches(0.42), row_h - Inches(0.06), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=10.5, bold=idx == 0)
 
 
 def _draw_loop_cycle(slide, items: List[str], left, top, width, height):
@@ -1491,7 +2142,7 @@ def _draw_loop_cycle(slide, items: List[str], left, top, width, height):
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
         
         x, y = positions[idx]
-        _add_info_box(slide, x, y, box_w, box_h, items[idx] if idx < len(items) else "", fill, line_color=None, font_size=7.6, bold=True, text_color=text_color)
+        _add_info_box(slide, x, y, box_w, box_h, items[idx] if idx < len(items) else "", fill, line_color=None, font_size=10.0, bold=True, text_color=text_color)
     arrows = [
         (MSO_SHAPE.RIGHT_ARROW, left + width * 0.50, top + height * 0.27),
         (MSO_SHAPE.DOWN_ARROW, left + width * 0.62, top + height * 0.50),
@@ -1526,7 +2177,7 @@ def _draw_swimlane_flow(slide, items: List[str], left, top, width, height):
         
         x = left + (box_w + gap) * idx
         y = top + lane_h * lane + Inches(0.16)
-        _add_info_box(slide, x, y, box_w, lane_h - Inches(0.32), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=7.4, bold=True, text_color=text_color)
+        _add_info_box(slide, x, y, box_w, lane_h - Inches(0.32), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=10.0, bold=True, text_color=text_color)
 
 
 def _draw_funnel(slide, items: List[str], left, top, width, height):
@@ -1545,7 +2196,7 @@ def _draw_funnel(slide, items: List[str], left, top, width, height):
         shape.fill.solid()
         shape.fill.fore_color.rgb = fill
         shape.line.fill.background()
-        _set_shape_text(shape, items[idx] if idx < len(items) else "", font_size=7.6, bold=True, color=text_color)
+        _set_shape_text(shape, items[idx] if idx < len(items) else "", font_size=10.5, bold=True, color=text_color)
 
 
 def _draw_table_compare(slide, items: List[str], left, top, width, height):
@@ -1560,10 +2211,10 @@ def _draw_table_compare(slide, items: List[str], left, top, width, height):
         parts = re.split(r"\s*(?:vs\.?|VS|:|>|->|/)\s*", items[idx], maxsplit=1) if idx < len(items) else ["", ""]
         left_text = parts[0]
         right_text = parts[1] if len(parts) > 1 else ""
-        _add_info_box(slide, left, y, col_w - Inches(0.03), row_h - Inches(0.04), left_text, fill, line_color=None, font_size=7.5, bold=idx == 0, text_color=text_color_left)
+        _add_info_box(slide, left, y, col_w - Inches(0.03), row_h - Inches(0.04), left_text, fill, line_color=None, font_size=10.5, bold=idx == 0, text_color=text_color_left)
         
         fill_right = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-        _add_info_box(slide, left + col_w + Inches(0.03), y, col_w - Inches(0.03), row_h - Inches(0.04), right_text or items[idx], fill_right, line_color=None, font_size=7.5)
+        _add_info_box(slide, left + col_w + Inches(0.03), y, col_w - Inches(0.03), row_h - Inches(0.04), right_text or items[idx], fill_right, line_color=None, font_size=10.5)
 
 
 def _draw_ranked_bars(slide, items: List[str], left, top, width, height):
@@ -1577,7 +2228,7 @@ def _draw_ranked_bars(slide, items: List[str], left, top, width, height):
         y = top + row_h * idx
         label = items[idx] if idx < len(items) else ""
         bar_w = width * (0.95 - idx * 0.13)
-        _add_info_box(slide, left, y + Inches(0.03), max(bar_w, width * 0.35), row_h - Inches(0.06), f"{idx + 1}. {label}", fill, line_color=None, font_size=7.8, bold=idx == 0, text_color=text_color)
+        _add_info_box(slide, left, y + Inches(0.03), max(bar_w, width * 0.35), row_h - Inches(0.06), f"{idx + 1}. {label}", fill, line_color=None, font_size=10.5, bold=idx == 0, text_color=text_color)
 
 
 def _draw_before_after(slide, items: List[str], left, top, width, height):
@@ -1588,11 +2239,11 @@ def _draw_before_after(slide, items: List[str], left, top, width, height):
         # Beforeはsub_text、Afterはaccent
         fill = _current_colors.get("sub_text", INFO_AMBER) if idx == 0 else _current_colors.get("accent", INFO_GREEN)
         x = left + (col_w + gap) * idx
-        _add_info_box(slide, x, top, col_w, Inches(0.34), labels[idx], fill, line_color=None, font_size=8.3, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
+        _add_info_box(slide, x, top, col_w, Inches(0.34), labels[idx], fill, line_color=None, font_size=12.0, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
         selected = items[idx::2][:3]
         box_fill = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-        box = _add_info_box(slide, x, top + Inches(0.44), col_w, height - Inches(0.44), "", box_fill, line_color=None, font_size=8.0)
-        _set_list_text(box, selected, font_size=8.4)
+        box = _add_info_box(slide, x, top + Inches(0.44), col_w, height - Inches(0.44), "", box_fill, line_color=None, font_size=10.5)
+        _set_list_text(box, selected, font_size=10.5)
 
 
 def _draw_option_columns(slide, items: List[str], left, top, width, height):
@@ -1605,7 +2256,7 @@ def _draw_option_columns(slide, items: List[str], left, top, width, height):
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
         
         x = left + (col_w + gap) * idx
-        _add_info_box(slide, x, top, col_w, height, items[idx] if idx < len(items) else "", fill, line_color=None, font_size=8.0, bold=True, text_color=text_color)
+        _add_info_box(slide, x, top, col_w, height, items[idx] if idx < len(items) else "", fill, line_color=None, font_size=10.5, bold=True, text_color=text_color)
 
 
 def _draw_progress_bars(slide, items: List[str], left, top, width, height):
@@ -1617,7 +2268,7 @@ def _draw_progress_bars(slide, items: List[str], left, top, width, height):
         match = re.search(r"(\d{1,3})\s*%", item)
         pct = min(100, int(match.group(1))) if match else int(90 - idx * 12)
         fill = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-        _add_info_box(slide, left, y + Inches(0.02), width, row_h - Inches(0.04), item, fill, line_color=None, font_size=7.4)
+        _add_info_box(slide, left, y + Inches(0.02), width, row_h - Inches(0.04), item, fill, line_color=None, font_size=10.0)
         
         # 進捗バーはアクセントカラー
         bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left + Inches(0.08), y + row_h - Inches(0.12), max((width - Inches(0.16)) * pct / 100, Inches(0.08)), Inches(0.05))
@@ -1646,7 +2297,7 @@ def _draw_gauge_cards(slide, items: List[str], left, top, width, height):
         
         # 下部ラベル
         label_fill = _current_colors.get("card_bg", INFO_BLUE_LIGHT)
-        _add_info_box(slide, x + Inches(0.08), top + height * 0.58, box_w - Inches(0.16), height * 0.34, items[idx] if idx < len(items) else "", label_fill, line_color=None, font_size=7.4, bold=True)
+        _add_info_box(slide, x + Inches(0.08), top + height * 0.58, box_w - Inches(0.16), height * 0.34, items[idx] if idx < len(items) else "", label_fill, line_color=None, font_size=10.0, bold=True)
 
 
 def _draw_delta_callouts(slide, items: List[str], left, top, width, height):
@@ -1668,7 +2319,7 @@ def _draw_delta_callouts(slide, items: List[str], left, top, width, height):
         arrow.line.fill.background()
         
         fill_box = _current_colors.get("card_bg", INFO_GREEN_LIGHT)
-        _add_info_box(slide, x, top + Inches(0.46), box_w, height - Inches(0.46), item, fill_box, line_color=None, font_size=7.6, bold=True)
+        _add_info_box(slide, x, top + Inches(0.46), box_w, height - Inches(0.46), item, fill_box, line_color=None, font_size=10.5, bold=True)
 
 
 def _draw_waterfall(slide, items: List[str], left, top, width, height):
@@ -1689,7 +2340,7 @@ def _draw_waterfall(slide, items: List[str], left, top, width, height):
         rect.line.fill.background()
         
         fill_box = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-        _add_info_box(slide, x, top, bar_w, y - top - Inches(0.04), items[idx] if idx < len(items) else "", fill_box, line_color=None, font_size=7.0)
+        _add_info_box(slide, x, top, bar_w, y - top - Inches(0.04), items[idx] if idx < len(items) else "", fill_box, line_color=None, font_size=10.0)
 
 
 def _draw_risk_register(slide, items: List[str], left, top, width, height):
@@ -1700,7 +2351,7 @@ def _draw_risk_register(slide, items: List[str], left, top, width, height):
         # 最初の「Risk」だけアクセントで強調
         fill = _current_colors.get("accent", INFO_RED) if idx == 0 else _current_colors.get("card_bg", INFO_BLUE_LIGHT)
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 0 else _current_colors.get("text", INFO_GRAY)
-        _add_info_box(slide, left + col_w * idx, top, col_w - Inches(0.03), header_h, header, fill, line_color=None, font_size=7.5, bold=True, text_color=text_color)
+        _add_info_box(slide, left + col_w * idx, top, col_w - Inches(0.03), header_h, header, fill, line_color=None, font_size=11.0, bold=True, text_color=text_color)
     row_count = min(max(len(items), 2), 4)
     row_h = (height - header_h - Inches(0.06)) / row_count
     for row in range(row_count):
@@ -1708,7 +2359,7 @@ def _draw_risk_register(slide, items: List[str], left, top, width, height):
         for col in range(3):
             text = parts[col] if col < len(parts) else ""
             fill_cell = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-            _add_info_box(slide, left + col_w * col, top + header_h + Inches(0.06) + row_h * row, col_w - Inches(0.03), row_h - Inches(0.03), text, fill_cell, line_color=None, font_size=6.8)
+            _add_info_box(slide, left + col_w * col, top + header_h + Inches(0.06) + row_h * row, col_w - Inches(0.03), row_h - Inches(0.03), text, fill_cell, line_color=None, font_size=9.5)
 
 
 def _draw_heatmap(slide, items: List[str], left, top, width, height):
@@ -1733,7 +2384,7 @@ def _draw_heatmap(slide, items: List[str], left, top, width, height):
                 fill = _current_colors.get("card_bg", INFO_GREEN_LIGHT)
                 text_color = _current_colors.get("text", INFO_GRAY)
                 
-            _add_info_box(slide, left + (cell_w + gap) * col, top + (cell_h + gap) * row, cell_w, cell_h, text, fill, line_color=None, font_size=6.8, bold=bool(text), text_color=text_color)
+            _add_info_box(slide, left + (cell_w + gap) * col, top + (cell_h + gap) * row, cell_w, cell_h, text, fill, line_color=None, font_size=9.5, bold=bool(text), text_color=text_color)
 
 
 def _draw_escalation_ladder(slide, items: List[str], left, top, width, height):
@@ -1747,16 +2398,16 @@ def _draw_escalation_ladder(slide, items: List[str], left, top, width, height):
         x = left + width * idx * 0.08
         y = top + height - step_h * (idx + 1)
         w = width - width * idx * 0.08
-        _add_info_box(slide, x, y, w, step_h - Inches(0.06), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=7.5, bold=idx == count - 1, text_color=text_color)
+        _add_info_box(slide, x, y, w, step_h - Inches(0.06), items[idx] if idx < len(items) else "", fill, line_color=None, font_size=10.0, bold=idx == count - 1, text_color=text_color)
 
 
 def _draw_priority_quadrants(slide, items: List[str], left, top, width, height):
     _draw_matrix(slide, items, left, top, width, height)
     # Highバッジはアクセント
     high_fill = _current_colors.get("accent", INFO_RED)
-    _add_info_box(slide, left + Inches(0.06), top + Inches(0.04), Inches(0.74), Inches(0.24), "High", high_fill, line_color=None, font_size=6.5, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
+    _add_info_box(slide, left + Inches(0.06), top + Inches(0.04), Inches(0.74), Inches(0.24), "High", high_fill, line_color=None, font_size=9.0, bold=True, text_color=RGBColor(0xff, 0xff, 0xff))
     low_fill = _current_colors.get("card_bg", INFO_GREEN_LIGHT)
-    _add_info_box(slide, left + width - Inches(0.82), top + height - Inches(0.3), Inches(0.74), Inches(0.24), "Low", low_fill, line_color=None, font_size=6.5, bold=True)
+    _add_info_box(slide, left + width - Inches(0.82), top + height - Inches(0.3), Inches(0.74), Inches(0.24), "Low", low_fill, line_color=None, font_size=9.0, bold=True)
 
 
 def _draw_decision_matrix(slide, items: List[str], left, top, width, height):
@@ -1767,7 +2418,7 @@ def _draw_decision_matrix(slide, items: List[str], left, top, width, height):
         # 決定(Decision)だけアクセントで強調
         fill = _current_colors.get("accent", INFO_BLUE) if idx == 2 else _current_colors.get("card_bg", INFO_BLUE_LIGHT)
         text_color = RGBColor(0xff, 0xff, 0xff) if idx == 2 else _current_colors.get("text", INFO_GRAY)
-        _add_info_box(slide, left + col_w * idx, top, col_w - Inches(0.03), header_h, header, fill, line_color=None, font_size=7.2, bold=True, text_color=text_color)
+        _add_info_box(slide, left + col_w * idx, top, col_w - Inches(0.03), header_h, header, fill, line_color=None, font_size=11.0, bold=True, text_color=text_color)
     rows = min(max(len(items), 2), 4)
     row_h = (height - header_h - Inches(0.06)) / rows
     for row in range(rows):
@@ -1775,7 +2426,7 @@ def _draw_decision_matrix(slide, items: List[str], left, top, width, height):
         parts = [part.strip() for part in re.split(r"\s*(?:\||/|:|->)\s*", text, maxsplit=2)]
         for col in range(3):
             fill_cell = _current_colors.get("card_bg", RGBColor(0xf8, 0xfa, 0xfc))
-            _add_info_box(slide, left + col_w * col, top + header_h + Inches(0.06) + row_h * row, col_w - Inches(0.03), row_h - Inches(0.03), parts[col] if col < len(parts) else "", fill_cell, line_color=None, font_size=6.8)
+            _add_info_box(slide, left + col_w * col, top + header_h + Inches(0.06) + row_h * row, col_w - Inches(0.03), row_h - Inches(0.03), parts[col] if col < len(parts) else "", fill_cell, line_color=None, font_size=9.5)
 
 
 def _draw_hub_spoke(slide, items: List[str], left, top, width, height):
@@ -1808,11 +2459,11 @@ def _draw_hub_spoke(slide, items: List[str], left, top, width, height):
         line.fill.solid()
         line.fill.fore_color.rgb = RGBColor(0xcb, 0xd5, 0xe1)
         line.line.fill.background()
-    _add_info_box(slide, cx, cy, center_w, center_h, center, INFO_BLUE_LIGHT, line_color=INFO_BLUE, font_size=8.0, bold=True)
+    _add_info_box(slide, cx, cy, center_w, center_h, center, INFO_BLUE_LIGHT, line_color=INFO_BLUE, font_size=11.0, bold=True)
     for idx, item in enumerate(spokes[:6]):
         fill, line_color = INFO_COLORS[(idx + 1) % len(INFO_COLORS)]
         x, y = positions[idx]
-        _add_info_box(slide, x, y, center_w, center_h, item, fill, line_color=line_color, font_size=7.0, bold=False)
+        _add_info_box(slide, x, y, center_w, center_h, item, fill, line_color=line_color, font_size=9.5, bold=False)
 
 
 def _resolve_visual_variant(style: str, requested: str, items: List[str], width, height) -> str:
@@ -1961,9 +2612,10 @@ def render_pptx_slide(prs: Presentation, slide_data: SlideNode, font_size_offset
     """SlideNodeデータから テンプレートのプレースホルダーへ直接データを流し込みレンダリングする"""
     if blank_layout is None:
         blank_layout = prs.slide_layouts[6]
-    slide = prs.slides.add_slide(blank_layout)
+
     # テンプレートを使用している場合
     if has_template:
+        slide = prs.slides.add_slide(blank_layout)
         ph_map = {ph.placeholder_format.idx: ph for ph in slide.placeholders}
         # 共通要素：スライド番号の書き込み (SLIDE_NUMBER タイプ)
         for ph in slide.placeholders:
@@ -2014,29 +2666,15 @@ def render_pptx_slide(prs: Presentation, slide_data: SlideNode, font_size_offset
                         pass
         _enhance_template_slide_infographic(slide, slide_data)
     else:
-        # フォールバック: テンプレートがない場合のマニュアル簡易レンダリング
-        from pptx.dml.color import RGBColor
-        COLOR_BG = RGBColor(0xff, 0xff, 0xff)
-        COLOR_TEXT_MAIN = RGBColor(0x0f, 0x17, 0x2a)
-        bg_shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
-        bg_shape.fill.solid()
-        bg_shape.fill.fore_color.rgb = COLOR_BG
-        bg_shape.line.fill.background()
-        tx_title = slide.shapes.add_textbox(Inches(0.8), Inches(0.4), Inches(11.733), Inches(0.8))
-        tx_title.text_frame.text = slide_data.title
-        tx_title.text_frame.paragraphs[0].font.name = "Meiryo"
-        tx_title.text_frame.paragraphs[0].font.size = Pt(32)
-        tx_title.text_frame.paragraphs[0].font.bold = True
-        tx_title.text_frame.paragraphs[0].font.color.rgb = COLOR_TEXT_MAIN
-        tx_body = slide.shapes.add_textbox(Inches(0.8), Inches(1.8), Inches(11.733), Inches(4.5))
-        tf = tx_body.text_frame
-        tf.word_wrap = True
-        for content in slide_data.placeholders:
-            if content.text_content:
-                p = tf.add_paragraph()
-                p.text = content.text_content
-                p.font.name = "Meiryo"
-                p.font.size = Pt(18 + font_size_offset)
+        # テンプレートなし（デフォルト）: 完全自立ネイティブ・インフォグラフィックス描画
+        render_native_infographic_slide(
+            prs=prs,
+            slide_data=slide_data,
+            font_size_offset=font_size_offset,
+            current_index=current_index,
+            total_slides=total_slides,
+            blank_layout=blank_layout,
+        )
 
 # --- Playwright 同期バリデーション実行ヘルパー ---
 
@@ -2298,33 +2936,10 @@ def save_physical_presentation(
             _format_cover_title(tx_main_title)
     else:
         title_slide = prs.slides.add_slide(title_layout)
-        bg_title = title_slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
-        bg_title.fill.solid()
-        bg_title.fill.fore_color.rgb = COLOR_WHITE
-        bg_title.line.fill.background()
-        accent_line = title_slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(3.666), Inches(3.6), Inches(6.0), Inches(0.02))
-        accent_line.fill.solid()
-        accent_line.fill.fore_color.rgb = COLOR_PRIMARY
-        accent_line.line.fill.background()
-        tx_main_title = title_slide.shapes.add_textbox(Inches(1.0), Inches(2.3), Inches(11.333), Inches(1.1))
-        tf_main_title = tx_main_title.text_frame
-        tf_main_title.word_wrap = True
-        p_main = tf_main_title.paragraphs[0]
-        p_main.alignment = PP_ALIGN.CENTER
-        p_main.text = presentation_data.presentation_title
-        p_main.font.name = "Meiryo"
-        p_main.font.size = Pt(44)
-        p_main.font.bold = True
-        p_main.font.color.rgb = COLOR_PRIMARY
-        tx_sub_title = title_slide.shapes.add_textbox(Inches(1.0), Inches(3.9), Inches(11.333), Inches(1.2))
-        tf_sub_title = tx_sub_title.text_frame
-        tf_sub_title.word_wrap = True
-        p_sub = tf_sub_title.paragraphs[0]
-        p_sub.alignment = PP_ALIGN.CENTER
-        p_sub.text = "R&D Technical Presentation  |  Generated by GP-Chat"
-        p_sub.font.name = "Meiryo"
-        p_sub.font.size = Pt(18)
-        p_sub.font.color.rgb = COLOR_TEXT_MUTED
+        theme = getattr(slides[0], "color_theme", "corporate") if slides else "corporate"
+        accent = getattr(slides[0], "accent_color_hex", None) if slides else None
+        colors = _resolve_theme_colors(theme, accent)
+        _render_cover_slide_native(title_slide, presentation_data.presentation_title, colors)
     for i, slide_data in enumerate(slides):
         layout_to_use = blank_layout
         if has_template and slide_data.layout_name in layouts_info:
@@ -2952,8 +3567,21 @@ class PPTXAgent:
                 template_instruction += f"- レイアウト名: '{name}'\n  使用可能な入力枠 (placeholders):\n" + "\n".join(ph_desc) + "\n"
         else:
             template_instruction = (
-                "\n\n(テンプレートがロードされなかったため、デフォルトの白紙レイアウトで生成します。)\n"
-                "layout_name には 'blank' などの仮の文字列を入れ、placeholders は idx=0 などのダミーのテキストを流し込んでください。"
+                "\n\n【ネイティブ・インフォグラフィックス描画モード】\n"
+                "外部テンプレートを使用せず、16:9のワイドスクリーンに最適なネイティブ・インフォグラフィックス描画エンジンでスライドを作成します。\n"
+                "以下の指示に厳格に従ってスライド構造を定義してください:\n"
+                "1. layout_name には 'infographic' を指定してください。\n"
+                "2. category_badge にはスライドの主題を示す英字または日本語カテゴリバッジ（例: 'EXECUTIVE SUMMARY', 'SYSTEM ARCHITECTURE', 'PERFORMANCE METRICS', 'ROADMAP' 等）を必ず指定してください。\n"
+                "3. lead_sentence にはスライドで最も伝えたいキーメッセージ・結論を1〜2行（50〜80文字程度）で簡潔に記述してください。この文章はタイトル直下のハイライトバナーに自動配置されます。\n"
+                "4. visual_type はスライドの情報の論理構造に合わせて適切に選定してください（'kpi', 'process', 'timeline', 'comparison', 'summary' 等）。\n"
+                "5. visual_variant は最適なバリアントを選定してください（'metric_cards', 'chevron_flow', 'horizontal_timeline', 'pros_cons', 'cards_2x2' 等）。\n"
+                "6. placeholders にはスライドの主要な箇条書きコンテンツを格納してください。idx=0（TITLE）にスライドタイトル、idx=1（BODY）に見出しと詳細を持った箇条書きテキストを入れてください。\n"
+                "   箇条書きのフォーマット例:\n"
+                "   • 【項目見出し】: 詳細説明テキスト（結論と背景を明確に）\n"
+                "   KPIの場合:\n"
+                "   • 【売上高】: 1.2億円 (前年比 +35%)\n"
+                "   • 【成約率】: 28.5% (目標を大幅達成)\n"
+                "   ネイティブ描画エンジンが自動的に見出し、詳細、数値を構文解析し、モダンな角丸カード、KPIブロック、矢印フロー、タイムライン等として美しくレイアウトします。\n"
             )
         source_system_instruction = ""
         if materialized_system_instruction:

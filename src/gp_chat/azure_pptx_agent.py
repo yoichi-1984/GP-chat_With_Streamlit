@@ -196,6 +196,8 @@ def _normalize_slide(raw_slide: Any, index: int, default_layout: str) -> dict[st
         "visual_variant": str(raw_slide.get("visual_variant") or "auto"),
         "color_theme": c_theme,
         "accent_color_hex": raw_slide.get("accent_color_hex"),
+        "category_badge": raw_slide.get("category_badge"),
+        "lead_sentence": raw_slide.get("lead_sentence"),
         "coverage_refs": list(refs) if isinstance(refs, list) else [],
     }
 
@@ -498,14 +500,16 @@ class AzurePPTXAgent:
             '  "slides": [\n'
             "    {\n"
             '      "slide_number": 1,\n'
+            '      "category_badge": "OVERVIEW & CHALLENGES",\n'
             '      "title": "スライドタイトル",\n'
+            '      "lead_sentence": "そのスライドで最も伝えたい1〜2行の結論キーメッセージ",\n'
             f'      "layout_name": "{default_layout}",\n'
             '      "placeholders": [\n'
             '        {"idx": 0, "text_content": "スライドタイトル"},\n'
-            '        {"idx": 1, "text_content": "本文や箇条書きテキスト（改行区切り）"}\n'
+            '        {"idx": 1, "text_content": "• 【小見出し1】: 具体的な根拠や数値\\n• 【小見出し2】: 具体的な根拠や数値"}\n'
             "      ],\n"
             '      "visual_type": "summary",\n'
-            '      "visual_variant": "cards_2x2",\n'
+            '      "visual_variant": "cards_3col",\n'
             '      "color_theme": "corporate",\n'
             '      "coverage_refs": ["R1", "関連事実"]\n'
             "    }\n"
@@ -514,8 +518,11 @@ class AzurePPTXAgent:
             "```\n"
             "※注意:\n"
             "- 最上位のタイトルキーは必ず 'presentation_title' です（30文字以内）。\n"
+            "- 各スライドの 'category_badge' には章やカテゴリを表す英語/日本語を指定してください。\n"
+            "- 各スライドの 'lead_sentence' にはハイライトバナー用の1〜2行の結論キーメッセージを指定してください。\n"
             "- 各スライドには必ず 'layout_name' と 'placeholders' の配列を含めてください。\n"
             "- 'placeholders' には各プレースホルダーの 'idx' と 'text_content' を指定してください。\n"
+            "- テキストは単なる箇条書きではなく『• 【小見出し】: 詳細説明』の構造化形式を推奨します。\n"
             + template_instruction
             + f"\n\n【source brief】\n{_brief_to_text(brief)}"
         )
