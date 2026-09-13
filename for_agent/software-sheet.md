@@ -121,11 +121,11 @@ gp-chat/
   - `run() -> None`: `sys.argv` を `["streamlit", "run", str(main_path)]` に再構築し、`streamlit.web.cli.main()` を呼び出してアプリを起動する。
 
 #### ② `src/gp_chat/main.py`
-- **責務**: アプリケーションのメインライフサイクル管理、UIレイアウト描画、チャット入力受付、ストリーミング応答制御、モデル別ルーティング分岐、Azure Fallback スーパーバイズ、思考ログ折りたたみ描画。
+- **責務**: アプリケーションのメインライフサイクル管理、UIレイアウト描画、チャット入力受付、ストリーミング応答制御、モデル別ルーティング分岐、Azure Fallback スーパーバイズ、思考ログ折りたたみ描画、およびレポート生成完了時のワンクリック操作コントロール描画（PPTX/PDF ダウンロードボタン、PC直接起動、エクスプローラーフォルダ起動）。
 - **主要関数**:
-  - `_resolve_mode_name(*, is_special_mode: bool, is_more_research: bool, is_deep_reasoning: bool, is_report_mode: bool) -> str`: 現在のUI状態から実行すべきモード識別名（`"report"`, `"research"`, `"reasoning"`, `"special"`, `"normal"`）を判定して返す。
-  - `_run_azure_mode(...) -> AzureModeResult`: Azure OpenAI を使用して各種モード（Normal, Reasoning, Research, Report, Code）を実行する統合ディスパッチャ。
-  - `main() -> None`: 初期セッション構築、メールアドレス入力ガード、システムプロンプト設定画面、サイドバー描画、履歴メッセージ描画（`thought_log` のアコーディオン表示含む）、ユーザー入力処理、AI応答ストリーミング、Cloud Logging 送信、自動保存までを一括制御。
+  - `_resolve_mode_name(*, is_special_mode: bool, is_more_research: bool, is_deep_reasoning: bool, is_report_pdf: bool, is_report_pptx: bool) -> str`: 現在のUI状態から実行すべきモード識別名（`"report_pptx"`, `"report_pdf"`, `"research"`, `"reasoning"`, `"special"`, `"normal"`）を判定して返す。
+  - `_run_azure_mode(...) -> AzureModeResult`: Azure OpenAI を使用して各種モード（Normal, Reasoning, Research, Report PDF, Report PPTX, Code）を実行する統合ディスパッチャ。
+  - `main() -> None`: 初期セッション構築、メールアドレス入力ガード、システムプロンプト設定画面、サイドバー描画、履歴メッセージ描画（`thought_log` のアコーディオン表示、PPTX/PDF 操作ボタングループ含む）、ユーザー入力処理、AI応答ストリーミング、Cloud Logging 送信、自動保存までを一括制御。
 
 #### ③ `src/gp_chat/sidebar.py`
 - **責務**: サイドバーUIコンポーネントの描画と設定変更ハンドリング、排他制御マトリクスの適用、Canvasエディタ描画、履歴JSONのロード/リセット。
@@ -1041,6 +1041,13 @@ graph LR
   * 思考プロセスの折りたたみ永続化 & 全依存関係の完全固定（==化）:
     * `main.py` において、回答完了後もタスク分割や思考過程をいつでも振り返れるよう、メッセージデータに `thought_log` を永続化し、チャット履歴描画ループに `st.expander("🧠 思考プロセス (Thinking Process)", expanded=False)` を追加。
     * アプリケーションの動作再現性と長期稼働安定性を高めるため、`pyproject.toml` および `requirements.txt` の全依存パッケージ（22個＋build）を動作検証済みの実績バージョン（`==`）に統一・完全固定。
+* **2026-09-13**
+  * PDF / PPTX レポート生成完了時のワンクリック操作コントロールの追加（ダウンロードボタン & PC直接起動）:
+    * ブラウザのセキュリティ仕様（`file:///` リンクのナビゲーション遮断）を回避し、ユーザーのコピペの手間を解消するため、PDF および PPTX レポートの操作ボタンをメイン画面上に拡充。
+    * メッセージ辞書（`assistant_msg`）に `pdf_path` および `html_path` を保持するよう `main.py` の生成完了部（Gemini / Azure 双方）を改修。
+    * メッセージ描画ループにおいて、PDF レポート時は「Download .pdf File（ブラウザダウンロード）」、「📄 PDFを直接開く（Windows既定ビューアー起動）」、「📁 保存先フォルダを開く（エクスプローラー起動）」の3つの操作ボタンを描画。
+    * PPTX レポート時にも同様に「Download .pptx File」、「📊 PPTXを直接開く」、「📁 保存先フォルダを開く」を横並びで配置し、操作感を完全に統一。
+    * `tests/test_report_buttons.py` を新設し、メタデータ付与および履歴 JSON シリアライズの整合性を検証（全30件テストパス）。
 * **2026-09-13**
   * GPT（Azure OpenAI）モデルにおける PowerPoint (.pptx) レポート自動生成対応およびスキーマ堅牢化:
     * `src/gp_chat/azure_pptx_agent.py` を新設し、GPT（gpt-5.6 等）を用いた自律 PowerPoint スライド生成パイプラインを実装。

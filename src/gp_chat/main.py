@@ -687,23 +687,86 @@ def run_chatbot_app():
                     with st.expander("🧠 思考プロセス (Thinking Process)", expanded=False):
                         st.markdown(utils.format_latex_delimiters(msg["thought_log"]))
                 st.markdown(utils.format_latex_delimiters(msg["content"]))      
-                # --- PowerPointダウンロードボタン表示ロジック ---
+                # --- PowerPoint操作ボタン表示ロジック ---
                 if "pptx_path" in msg and msg["pptx_path"]:
                     pptx_path = msg["pptx_path"]
                     if os.path.exists(pptx_path):
+                        p_col1, p_col2, p_col3 = st.columns(3)
                         try:
                             with open(pptx_path, "rb") as f:
-                                st.download_button(
+                                p_col1.download_button(
                                     label="Download .pptx File",
                                     data=f.read(),
                                     file_name=os.path.basename(pptx_path),
                                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                    key=f"pptx_dl_{i}"
+                                    key=f"pptx_dl_{i}",
+                                    width="stretch",
                                 )
                         except Exception as e:
-                            st.error(f"PowerPointファイルの読み込みに失敗しました: {e}")
+                            p_col1.error(f"PowerPointファイルの読み込みに失敗しました: {e}")
+
+                        if p_col2.button("📊 PPTXを直接開く", key=f"pptx_open_{i}", width="stretch"):
+                            try:
+                                os.startfile(os.path.abspath(pptx_path))
+                            except Exception as e:
+                                st.error(f"PowerPoint起動エラー: {e}")
+
+                        pptx_folder = os.path.dirname(os.path.abspath(pptx_path))
+                        if p_col3.button("📁 保存先フォルダを開く", key=f"pptx_folder_{i}", width="stretch"):
+                            try:
+                                os.startfile(pptx_folder)
+                            except Exception as e:
+                                st.error(f"フォルダ起動エラー: {e}")
                     else:
                         st.warning("生成されたPowerPointファイルが見つかりません。")
+
+                # --- PDF / HTML レポート操作ボタン表示ロジック ---
+                if "pdf_path" in msg and msg["pdf_path"]:
+                    pdf_path = msg["pdf_path"]
+                    if os.path.exists(pdf_path):
+                        pdf_col1, pdf_col2, pdf_col3 = st.columns(3)
+                        try:
+                            with open(pdf_path, "rb") as f:
+                                pdf_col1.download_button(
+                                    label="Download .pdf File",
+                                    data=f.read(),
+                                    file_name=os.path.basename(pdf_path),
+                                    mime="application/pdf",
+                                    key=f"pdf_dl_{i}",
+                                    width="stretch",
+                                )
+                        except Exception as e:
+                            pdf_col1.error(f"PDFファイルの読み込みに失敗しました: {e}")
+
+                        if pdf_col2.button("📄 PDFを直接開く", key=f"pdf_open_{i}", width="stretch"):
+                            try:
+                                os.startfile(os.path.abspath(pdf_path))
+                            except Exception as e:
+                                st.error(f"PDF起動エラー: {e}")
+
+                        pdf_folder = os.path.dirname(os.path.abspath(pdf_path))
+                        if pdf_col3.button("📁 保存先フォルダを開く", key=f"pdf_folder_{i}", width="stretch"):
+                            try:
+                                os.startfile(pdf_folder)
+                            except Exception as e:
+                                st.error(f"フォルダ起動エラー: {e}")
+                    else:
+                        st.warning("生成されたPDFファイルが見つかりません。")
+                elif "html_path" in msg and msg["html_path"]:
+                    html_path = msg["html_path"]
+                    if os.path.exists(html_path):
+                        h_col1, h_col2 = st.columns(2)
+                        if h_col1.button("🌐 HTMLを直接開く", key=f"html_open_{i}", width="stretch"):
+                            try:
+                                os.startfile(os.path.abspath(html_path))
+                            except Exception as e:
+                                st.error(f"HTML起動エラー: {e}")
+                        html_folder = os.path.dirname(os.path.abspath(html_path))
+                        if h_col2.button("📁 保存先フォルダを開く", key=f"html_folder_{i}", width="stretch"):
+                            try:
+                                os.startfile(html_folder)
+                            except Exception as e:
+                                st.error(f"フォルダ起動エラー: {e}")
 
                 # --- 画像 (グラフ) の表示ロジック ---
                 if "images" in msg and msg["images"]:
@@ -1205,10 +1268,17 @@ def run_chatbot_app():
                     assistant_msg["grounding_metadata"] = final_grounding_metadata
                 if is_report_mode:
                     assistant_msg["report_mode"] = True
-                    if '_report_metadata' in locals() and _report_metadata and "pptx_path" in _report_metadata:
-                        assistant_msg["pptx_path"] = _report_metadata["pptx_path"]
-                    elif 'mode_llm_meta' in locals() and mode_llm_meta and "pptx_path" in mode_llm_meta:
-                        assistant_msg["pptx_path"] = mode_llm_meta["pptx_path"]
+                    rep_meta = {}
+                    if '_report_metadata' in locals() and _report_metadata:
+                        rep_meta = _report_metadata
+                    elif 'mode_llm_meta' in locals() and mode_llm_meta:
+                        rep_meta = mode_llm_meta
+                    if "pptx_path" in rep_meta:
+                        assistant_msg["pptx_path"] = rep_meta["pptx_path"]
+                    if "pdf_path" in rep_meta and rep_meta.get("pdf_success", True):
+                        assistant_msg["pdf_path"] = rep_meta["pdf_path"]
+                    if "html_path" in rep_meta:
+                        assistant_msg["html_path"] = rep_meta["html_path"]
                 
                 if is_special_mode:
                     for m in target_messages:
@@ -1415,8 +1485,13 @@ def run_chatbot_app():
                             assistant_msg["grounding_metadata"] = final_grounding_metadata
                         if is_report_mode:
                             assistant_msg["report_mode"] = True
-                            if 'mode_llm_meta' in locals() and mode_llm_meta and "pptx_path" in mode_llm_meta:
-                                assistant_msg["pptx_path"] = mode_llm_meta["pptx_path"]
+                            if 'mode_llm_meta' in locals() and mode_llm_meta:
+                                if "pptx_path" in mode_llm_meta:
+                                    assistant_msg["pptx_path"] = mode_llm_meta["pptx_path"]
+                                if "pdf_path" in mode_llm_meta and mode_llm_meta.get("pdf_success", True):
+                                    assistant_msg["pdf_path"] = mode_llm_meta["pdf_path"]
+                                if "html_path" in mode_llm_meta:
+                                    assistant_msg["html_path"] = mode_llm_meta["html_path"]
 
                         if is_special_mode:
                             for m in target_messages:
@@ -1465,4 +1540,4 @@ def run_chatbot_app():
                 st.rerun()
 
 if __name__ == "__main__":
-    run_chatbot_app()
+    run_chatbot_app()
