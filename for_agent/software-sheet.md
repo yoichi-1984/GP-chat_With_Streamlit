@@ -109,6 +109,7 @@ gp-chat/
         ├── azure_reasoning_agent.py # Azure用Deep Reasoningエージェント
         ├── azure_research_agent.py # Azure用徹底調査エージェント
         ├── azure_report_agent.py # Azure用レポート生成エージェント
+        ├── azure_pptx_agent.py # Azure用PowerPointネイティブ生成エージェント
         └── cloud_logging_utils.py # GCP Cloud Logging 送信ユーティリティ
 ```
 
@@ -289,8 +290,8 @@ gp-chat/
 #### ㉓ `src/gp_chat/azure_history_utils.py`
 - **責務**: 会話履歴メッセージから Azure 呼び出し用の辞書形式リストへの変換ユーティリティ。
 
-#### ㉔ `src/gp_chat/azure_reasoning_agent.py` / `azure_research_agent.py` / `azure_report_agent.py` / `azure_code_agent.py`
-- **責務**: 主系（Gemini）に対応する Azure 側の特化型自律エージェント群（Deep Reasoning、徹底調査、HTML/PDFレポート生成、コード実行監視＆自己修復）。
+#### ㉔ `src/gp_chat/azure_reasoning_agent.py` / `azure_research_agent.py` / `azure_report_agent.py` / `azure_pptx_agent.py` / `azure_code_agent.py`
+- **責務**: 主系（Gemini）に対応する Azure 側の特化型自律エージェント群（Deep Reasoning、徹底調査、HTML/PDFレポート生成、PowerPointネイティブスライド生成、コード実行監視＆自己修復）。`azure_pptx_agent.py` は GPT の Structured Outputs、Playwright による幾何学バリデーション・要約リライト、および python-pptx による物理描画を統括する。
 
 #### ㉕ `src/gp_chat/cloud_logging_utils.py`
 - **責務**: Google Cloud Logging への監査ログ送信。
@@ -798,6 +799,7 @@ GP-Chat は、GCP 上に存在しない特殊な機能・モデルを直接 Azur
 | `azure_reasoning_agent.py` | Azure OpenAI を用いた 3 段階 Deep Reasoning パイプライン。 |
 | `azure_research_agent.py` | Azure OpenAI を用いた ReAct 型徹底調査ループ。 |
 | `azure_report_agent.py` | Azure OpenAI を用いた HTML プレゼン生成 & PDF 印刷。 |
+| `azure_pptx_agent.py` | 【新設】Azure OpenAI (GPT) を用いた PowerPoint ネイティブスライド自動生成 4層パイプライン。 |
 | `azure_code_agent.py` | Azure OpenAI を用いた Python コード自動実行 & 自己修復ループ。 |
 
 ### 9.1 GPT-5.6 / GPT-6 専用 HTTPX2並行・細切れハイブリッドオーケストレーター仕様 (`azure_deep_orchestrator.py`)
@@ -1039,6 +1041,15 @@ graph LR
   * 思考プロセスの折りたたみ永続化 & 全依存関係の完全固定（==化）:
     * `main.py` において、回答完了後もタスク分割や思考過程をいつでも振り返れるよう、メッセージデータに `thought_log` を永続化し、チャット履歴描画ループに `st.expander("🧠 思考プロセス (Thinking Process)", expanded=False)` を追加。
     * アプリケーションの動作再現性と長期稼働安定性を高めるため、`pyproject.toml` および `requirements.txt` の全依存パッケージ（22個＋build）を動作検証済みの実績バージョン（`==`）に統一・完全固定。
+* **2026-09-13**
+  * GPT（Azure OpenAI）モデルにおける PowerPoint (.pptx) レポート自動生成対応:
+    * `azure_pptx_agent.py` を新設し、GPTモデル（`gpt-5.3-codex`, `gpt-5.6`, `gpt-6` 等）選択時でも PowerPoint ネイティブスライド自動生成パイプラインを自律実行可能に拡張。
+    * GPT の Structured Outputs（`PresentationSourceBrief`, `PresentationDSLSchema`, `PlaceholderContent`）による構造化スライド構成生成と、Playwright による幾何学溢れバリデーションおよび要約自己修復ループ（最大3回）を統合。
+    * Azure OpenAI DALL-E 3 によるスライド挿絵生成、および DALL-E 未設定時の安全な画像スキップ・フォールバック機構を導入。
+    * `azure_runtime.py` に `AZURE_OPENAI_DALLE_DEPLOYMENT` 設定を追加。
+    * `main.py` の `_resolve_mode_name` および `_run_azure_mode` に `report_pptx` モードディスパッチを追加し、UI へのダウンロードボタン連携を実装。
+    * `pptx_agent.py` の物理スライド描画処理を `save_physical_presentation` としてモジュールレベル関数化し、Gemini / Azure 間で共通利用できるようにリファクタリング。
+    * `tests/test_azure_pptx_agent.py` を新設し、Pylint 10.00/10 および単体テスト全件合格を確認。
 * **2026-09-13**
   * PDFレポートにおける絵文字表示最適化（Twemoji/SVG）およびマルチモーダルVLM視覚検査パイプラインの導入:
     * 絵文字（🤖, 💡, 📊 等）が Chromium ヘッドレス（`--print-to-pdf`）で文字化け（.notdef / 豆腐文字）を起こす問題を解消するため、`report_visual_inspector.py` を新設。

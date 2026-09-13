@@ -30,6 +30,7 @@ try:
     from gp_chat import azure_research_agent
     from gp_chat import azure_reasoning_agent
     from gp_chat import azure_report_agent
+    from gp_chat import azure_pptx_agent
     from gp_chat import azure_code_agent
     from gp_chat import azure_history_utils
     from gp_chat import azure_supervisor_helpers
@@ -55,6 +56,7 @@ except ImportError:
     import azure_research_agent
     import azure_reasoning_agent
     import azure_report_agent
+    import azure_pptx_agent
     import azure_code_agent
     import azure_history_utils
     import azure_supervisor_helpers
@@ -62,9 +64,11 @@ except ImportError:
     from azure_common_types import AzureModeResult
 
 
-def _resolve_mode_name(*, is_special_mode, is_more_research, is_deep_reasoning, is_report_mode):
-    if is_report_mode:
-        return "report"
+def _resolve_mode_name(*, is_special_mode, is_more_research, is_deep_reasoning, is_report_pdf, is_report_pptx):
+    if is_report_pptx:
+        return "report_pptx"
+    if is_report_pdf:
+        return "report_pdf"
     if is_more_research:
         return "research"
     if is_deep_reasoning:
@@ -108,7 +112,28 @@ def _run_azure_mode(
             f"[Azure] Attached {len(context.file_attachments_meta)} files to the request."
         )
 
-    if mode_name == "report":
+    if mode_name == "report_pptx":
+        assistant_text, usage_metadata, report_meta = azure_pptx_agent.run_pptx_agent(
+            runtime=azure_rt,
+            prompts=prompts,
+            context=context,
+            messages=target_messages,
+            max_output_tokens=max_output_tokens,
+            text_placeholder=text_placeholder,
+            thought_status=thought_status,
+            model_id=model_id,
+        )
+        return AzureModeResult(
+            full_response=assistant_text,
+            system_instruction=context.system_instruction,
+            usage_metadata=usage_metadata,
+            mode_meta=report_meta,
+            available_files_map=context.available_files_map,
+            file_attachments_meta=context.file_attachments_meta,
+            retry_context_snapshot=context.clone_retry_context(),
+        )
+
+    if mode_name in ("report", "report_pdf"):
         assistant_text, usage_metadata, report_meta = azure_report_agent.run_report_generation(
             runtime=azure_rt,
             prompts=prompts,
@@ -840,7 +865,8 @@ def run_chatbot_app():
                 is_special_mode=is_special_mode,
                 is_more_research=is_more_research,
                 is_deep_reasoning=is_deep_reasoning,
-                is_report_mode=is_report_mode,
+                is_report_pdf=is_report_pdf,
+                is_report_pptx=is_report_pptx,
             )
             gcp_debug_start = len(st.session_state.get("debug_logs", []))
             used_azure_fallback = False
@@ -1181,6 +1207,8 @@ def run_chatbot_app():
                     assistant_msg["report_mode"] = True
                     if '_report_metadata' in locals() and _report_metadata and "pptx_path" in _report_metadata:
                         assistant_msg["pptx_path"] = _report_metadata["pptx_path"]
+                    elif 'mode_llm_meta' in locals() and mode_llm_meta and "pptx_path" in mode_llm_meta:
+                        assistant_msg["pptx_path"] = mode_llm_meta["pptx_path"]
                 
                 if is_special_mode:
                     for m in target_messages:
