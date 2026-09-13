@@ -7,8 +7,10 @@ from pathlib import Path
 import streamlit as st
 try:
     from gp_chat import state_manager
+    from gp_chat import report_visual_inspector
 except ImportError:
     import state_manager
+    import report_visual_inspector
 from . import azure_history_utils
 from . import azure_responses_router
 from .azure_runtime import AzureRuntime
@@ -154,6 +156,9 @@ def run_report_generation(
     if "<html" not in html_document.lower():
         raise ValueError("Azure report agent did not return a complete HTML document.")
 
+    # Twemoji CDN & 絵文字フォールバックCSSを自動注入
+    html_document = report_visual_inspector.inject_twemoji_and_fonts(html_document)
+
     folder_name = _resolve_report_folder_name(messages, runtime)
     report_dir = os.path.join("slide_data", folder_name)
     os.makedirs(report_dir, exist_ok=True)
@@ -167,6 +172,65 @@ def run_report_generation(
         html_file.write(html_document)
 
     state_manager.add_debug_log(f"[Azure Report] Saved HTML: {html_path}")
+
+    # --- マルチモーダルVLM (Azure Vision) による視覚的目視検査 ---
+    thought_status.update(
+        label="スライドの見た目（文字化け・レイアウト）を目視検査中...",
+        state="running",
+        expanded=False,
+    )
+    temp_inspect_dir = os.path.join(report_dir, f"{base_name}_inspect")
+    slide_images = report_visual_inspector.capture_slides_as_images(
+        html_path, temp_inspect_dir, max_slides=6
+    )
+    if slide_images:
+        inspection = report_visual_inspector.inspect_slides_with_azure(
+            runtime=runtime,
+            slide_images=slide_images,
+        )
+        if not inspection.passed:
+            state_manager.add_debug_log(
+                f"[Azure Report] Visual inspection failed: {inspection.issues}", "warning"
+            )
+            thought_status.update(
+                label="視覚検査で不備を検出。レイアウトを自動調整して再生成中...",
+                state="running",
+                expanded=True,
+            )
+            fix_adv = (
+                f"改善アドバイス: {inspection.suggested_prompt_fix}\n"
+                if inspection.suggested_prompt_fix else ""
+            )
+            retry_instruction = (
+                f"{report_instruction}\n\n"
+                "# 視覚品質検査官からの修正指示（最優先で遵守してください）\n"
+                "前回のスライド画像検査において、以下の問題が視覚的に確認されました。"
+                "これらを確実に解決するようにHTMLコードを修正・再構成してください：\n"
+                + "\n".join(f"- {issue}" for issue in inspection.issues) + "\n"
+                + fix_adv
+            )
+            retry_messages = list(context.messages)
+            retry_messages.append(
+                {"role": "user", "content": [{"type": "input_text", "text": retry_instruction}]}
+            )
+            retry_response = azure_responses_router.generate_response(
+                runtime=runtime,
+                input_messages=retry_messages,
+                instructions=context.system_instruction,
+                max_output_tokens=max_output_tokens,
+                temperature=0.2,
+            )
+            retry_html = _extract_html_document(retry_response.text)
+            if "<html" in retry_html.lower():
+                html_document = report_visual_inspector.inject_twemoji_and_fonts(retry_html)
+                with open(html_path, "w", encoding="utf-8") as html_file:
+                    html_file.write(html_document)
+                state_manager.add_debug_log(f"[Azure Report] Saved retry HTML: {html_path}")
+                response = retry_response
+        else:
+            state_manager.add_debug_log("[Azure Report] Visual inspection passed.")
+
+    thought_status.update(label="PDF スライドをレンダリング中...", state="running", expanded=False)
     pdf_success, pdf_error = _render_html_to_pdf(html_path, pdf_path)
     if pdf_success:
         assistant_text = (
@@ -175,7 +239,9 @@ def run_report_generation(
             f"- PDF: `{pdf_path}`"
         )
         state_manager.add_debug_log(f"[Azure Report] Saved PDF: {pdf_path}")
-        thought_status.update(label="Azure report generation complete.", state="complete", expanded=False)
+        thought_status.update(
+            label="Azure report generation complete.", state="complete", expanded=False
+        )
     else:
         assistant_text = (
             "Azure fallback generated the HTML report, but PDF export failed.\n\n"
@@ -183,7 +249,11 @@ def run_report_generation(
             f"- PDF: `{pdf_path}`\n"
             f"- Error: {pdf_error}"
         )
-        thought_status.update(label="Azure report generation failed during PDF export.", state="error", expanded=True)
+        thought_status.update(
+            label="Azure report generation failed during PDF export.",
+            state="error",
+            expanded=True,
+        )
         state_manager.add_debug_log(f"[Azure Report] PDF export failed: {pdf_error}", "error")
 
     text_placeholder.markdown(assistant_text)

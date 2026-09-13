@@ -93,6 +93,7 @@ gp-chat/
         ├── reasoning_agent.py  # Deep Reasoning エージェント（立案・自己批判・統合）
         ├── research_agent.py   # ReAct 型自律反復検索エージェント
         ├── report_agent.py     # HTML/PDF レポート生成エージェント
+        ├── report_visual_inspector.py # PDFレポート用Twemoji注入・Playwrightキャプチャ・VLM視覚検査モジュール
         ├── pptx_agent.py       # PowerPoint ネイティブ生成 & 幾何学バリデーションエージェント
         ├── format.pptx         # PowerPoint スライド生成用デザインテンプレート
         ├── azure_runtime.py    # Azure OpenAI クライアント初期化 & ランタイム管理
@@ -213,11 +214,21 @@ gp-chat/
     3. Synthesis: 全収集事実を統合し、包括的レポートをストリーミング生成 (`temperature=0.3`)。
 
 #### ⑬ `src/gp_chat/report_agent.py`
-- **責務**: 会話履歴からのプレゼンテーション用 HTML スライド生成および Headless ブラウザによる PDF 自動エクスポート。
+- **責務**: 会話履歴からのプレゼンテーション用 HTML スライド生成、Twemoji/フォント自動注入、マルチモーダルVLM視覚検査（文字化け・はみ出し自動検知＆リトライ）、および Headless ブラウザによる PDF 自動エクスポート。
 - **主要関数**:
-  - `run_report_agent(...) -> tuple[str, str, dict]`: 会話履歴から A4横向きカードUI HTML を生成し、`slide_data/<フォルダ>/<連番>.html` に保存。
+  - `run_report_generation(...) -> tuple[str, object | None, dict]`: 会話履歴から A4横向きカードUI HTML を生成し、Twemoji/絵文字フォントCSSを自動注入。Playwrightでスライド画像をキャプチャし、Gemini VLMによる視覚品質検査を実施（不備時は1回自動リトライ）。最終的に `slide_data/<フォルダ>/<連番>.html` および `.pdf` に保存。
   - `_find_pdf_browser() -> str | None`: Edge / Chrome の実行ファイルパスを自動探索。
-  - `_render_html_to_pdf(html_path: str, pdf_path: str) -> bool`: Headless ブラウザを `subprocess.run` で起動し、`--print-to-pdf` で PDF を保存。
+  - `_render_html_to_pdf(html_path: str, pdf_path: str) -> tuple[bool, str | None]`: Headless ブラウザを `subprocess.run` で起動し、`--print-to-pdf` で PDF を保存。
+
+#### ⑬-B `src/gp_chat/report_visual_inspector.py`
+- **責務**: PDFレポートにおける絵文字文字化け防止のための Twemoji / CSS自動注入、Playwright によるスライド要素の高解像度画像キャプチャ、およびマルチモーダルVLM（Gemini / Azure Vision）を用いた「視覚的」目視品質検査。
+- **主要関数・クラス**:
+  - `class InspectionResult`: 視覚検査結果（`passed: bool`, `issues: List[str]`, `suggested_prompt_fix: str`, `raw_response: str`）。
+  - `inject_twemoji_and_fonts(html_content: str) -> str`: Twemoji CDN スクリプト（SVG絵文字化）および `'Segoe UI Emoji'` 等の二重防護フォールバックCSSを HTML の `<head>` に自動注入。重複注入を防止。
+  - `capture_slides_as_images(html_path: str, temp_dir: str, max_slides: int = 6) -> List[dict]`: Playwright（Chromium / Edge / Chrome）を使用してHTMLスライドをレンダリングし、各 `.slide` 要素のPNG画像を保存・取得。
+  - `parse_vlm_inspection_response(raw_text: str) -> InspectionResult`: VLMの検査結果（JSON）を安全にパース。
+  - `inspect_slides_with_gemini(client, model_id: str, slide_images: List[dict]) -> InspectionResult`: Gemini のマルチモーダル機能（画像パーツ渡し）を用いて、文字化け（☒）や枠外はみ出し、レイアウト崩れを目視検査。
+  - `inspect_slides_with_azure(runtime, slide_images: List[dict]) -> InspectionResult`: Azure OpenAI (GPT Vision) の `input_image` 機能を用いて、同様にスライド画像を目視検査。
 
 #### ⑭ `src/gp_chat/pptx_agent.py`
 - **責務**: PowerPoint ネイティブプレゼンテーション自動生成、Playwright幾何学バリデーション、AI画像自動生成/トリミング、Marp設計思想の適用、4層パイプラインの実行。
@@ -1028,6 +1039,12 @@ graph LR
   * 思考プロセスの折りたたみ永続化 & 全依存関係の完全固定（==化）:
     * `main.py` において、回答完了後もタスク分割や思考過程をいつでも振り返れるよう、メッセージデータに `thought_log` を永続化し、チャット履歴描画ループに `st.expander("🧠 思考プロセス (Thinking Process)", expanded=False)` を追加。
     * アプリケーションの動作再現性と長期稼働安定性を高めるため、`pyproject.toml` および `requirements.txt` の全依存パッケージ（22個＋build）を動作検証済みの実績バージョン（`==`）に統一・完全固定。
+* **2026-09-13**
+  * PDFレポートにおける絵文字表示最適化（Twemoji/SVG）およびマルチモーダルVLM視覚検査パイプラインの導入:
+    * 絵文字（🤖, 💡, 📊 等）が Chromium ヘッドレス（`--print-to-pdf`）で文字化け（.notdef / 豆腐文字）を起こす問題を解消するため、`report_visual_inspector.py` を新設。
+    * LLM出力HTMLに対し、Twemoji CDN（SVG絵文字自動変換）および `'Segoe UI Emoji'` フォールバックCSSを自動注入する `inject_twemoji_and_fonts` を実装。
+    * Playwright を用いてHTMLスライド要素のレンダリング画像（PNG）をキャプチャし、マルチモーダルVLM（Gemini / Azure Vision）で「文字化け・枠外はみ出し・レイアウト崩れ」を目視検査する自己修復リトライループ（最大1回）を `report_agent.py` および `azure_report_agent.py` に統合。
+    * `prompts.yaml` の `report_pdf` において、スライドへの絵文字積極活用の指示を追加。
 * **2026-09-05**
   * 第三者レビュー & 堅牢化検証 (/review):
     * `azure_deep_orchestrator.py` のタスク分解（Phase 1）において、マークダウンコードブロックや前後の解説文が混入した場合でも確実に JSON を抽出・復元する `_safe_json_loads` を実装。
