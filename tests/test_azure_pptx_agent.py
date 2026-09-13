@@ -151,6 +151,63 @@ class TestAzurePPTXAgent(unittest.TestCase):
             if os.path.exists(final_pptx):
                 os.remove(final_pptx)
 
+    def test_parse_presentation_dsl_with_missing_fields_recovers_gracefully(self):
+        # GPTが presentation_title ではなく title を返し、layout_name や placeholders がないケース
+        informal_gpt_json = """{
+            "title": "Gemini FlashからProまでの進化と最新技術トレンドの全体像まとめ",
+            "slides": [
+                {
+                    "slide_number": 1,
+                    "title": "Gemini 1.5 Flash の登場",
+                    "content": ["高スループットと低レイテンシ", "100万トークンのコンテキスト"],
+                    "source_references": ["R1", "R2"]
+                },
+                {
+                    "slide_number": 2,
+                    "title": "Gemini 2.0 Flash の飛躍",
+                    "body": "マルチモーダルライブ機能の追加。思考プロセスの高速化。",
+                    "layout": "2つのコンテンツ"
+                }
+            ]
+        }"""
+        schema = azure_pptx_agent._parse_presentation_dsl(
+            informal_gpt_json, default_layout="標準レイアウト"
+        )
+        self.assertIsInstance(schema, PresentationDSLSchema)
+        # 30文字以内に自動トリミングされていること
+        self.assertLessEqual(len(schema.presentation_title), 30)
+        self.assertEqual(len(schema.slides), 2)
+
+        # スライド1の自動修復検証
+        slide1 = schema.slides[0]
+        self.assertEqual(slide1.layout_name, "標準レイアウト")
+        self.assertGreaterEqual(len(slide1.placeholders), 2)
+        self.assertEqual(slide1.placeholders[0].idx, 0)
+        self.assertEqual(slide1.placeholders[0].text_content, "Gemini 1.5 Flash の登場")
+        self.assertIn("高スループット", slide1.placeholders[1].text_content)
+
+        # スライド2の自動修復検証
+        slide2 = schema.slides[1]
+        self.assertEqual(slide2.layout_name, "2つのコンテンツ")
+        self.assertGreaterEqual(len(slide2.placeholders), 2)
+        self.assertIn("マルチモーダルライブ", slide2.placeholders[1].text_content)
+
+    def test_parse_source_brief_with_informal_keys(self):
+        # GPTが別名キー（request, facts, units）で返した場合の正規化検証
+        informal_brief_json = """{
+            "request": "Gemini進化の要約",
+            "target": "開発者",
+            "sources": ["公式ブログ"],
+            "facts": "1.5 Flashリリース\\n2.0 Flash発表",
+            "units": ["速度向上", "コスト半減"]
+        }"""
+        brief = azure_pptx_agent._parse_source_brief(informal_brief_json)
+        self.assertIsInstance(brief, PresentationSourceBrief)
+        self.assertEqual(brief.core_request, "Gemini進化の要約")
+        self.assertEqual(brief.audience, "開発者")
+        self.assertEqual(len(brief.key_facts), 2)
+        self.assertEqual(len(brief.source_coverage_units), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

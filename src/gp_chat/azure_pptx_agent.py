@@ -78,16 +78,174 @@ def _safe_json_loads(raw_text: str) -> dict[str, Any]:
     return json.loads(clean_text)
 
 
+def _normalize_source_brief_data(data: dict[str, Any]) -> dict[str, Any]:
+    """GPTが返した source brief 辞書を PresentationSourceBrief 互換に正規化する。"""
+    if not isinstance(data, dict):
+        data = {}
+    normalized = dict(data)
+    if not normalized.get("core_request"):
+        normalized["core_request"] = (
+            data.get("request")
+            or data.get("topic")
+            or data.get("purpose")
+            or data.get("theme")
+            or ""
+        )
+    if not normalized.get("audience"):
+        normalized["audience"] = data.get("target") or data.get("reader") or "一般関係者"
+    if not normalized.get("key_facts"):
+        facts = data.get("facts") or data.get("points") or data.get("key_points") or []
+        if isinstance(facts, str):
+            facts = [f.strip() for f in facts.split("\n") if f.strip()]
+        normalized["key_facts"] = list(facts) if isinstance(facts, list) else []
+    if not normalized.get("source_coverage_units"):
+        units = data.get("units") or data.get("coverage_units") or []
+        if isinstance(units, str):
+            units = [u.strip() for u in units.split("\n") if u.strip()]
+        normalized["source_coverage_units"] = list(units) if isinstance(units, list) else []
+    if not normalized.get("coverage_requirements"):
+        reqs = data.get("requirements") or data.get("coverage") or []
+        normalized["coverage_requirements"] = list(reqs) if isinstance(reqs, list) else []
+    return normalized
+
+
+def _normalize_placeholder(raw: Any, fallback_idx: int) -> dict[str, Any]:
+    """プレースホルダー要素を PlaceholderContent 互換に正規化する。"""
+    if not isinstance(raw, dict):
+        return {"idx": fallback_idx, "text_content": str(raw)}
+    idx_val = raw.get("idx")
+    try:
+        idx_num = int(idx_val) if idx_val is not None else fallback_idx
+    except (ValueError, TypeError):
+        idx_num = fallback_idx
+    text = raw.get("text_content") or raw.get("text") or raw.get("content")
+    if isinstance(text, list):
+        text = "\n".join(str(item) for item in text)
+    return {
+        "idx": idx_num,
+        "text_content": str(text) if text is not None else None,
+        "image_prompt": raw.get("image_prompt"),
+        "use_user_image": bool(raw.get("use_user_image", False)),
+        "crop_instruction": raw.get("crop_instruction"),
+    }
+
+
+def _build_fallback_placeholders(slide_dict: dict[str, Any], title: str) -> list[dict[str, Any]]:
+    """placeholders が欠落しているスライド辞書からプレースホルダー一覧を構成する。"""
+    phs: list[dict[str, Any]] = [{"idx": 0, "text_content": title}]
+    body = (
+        slide_dict.get("content")
+        or slide_dict.get("body")
+        or slide_dict.get("bullets")
+        or slide_dict.get("points")
+        or slide_dict.get("text")
+    )
+    if body:
+        if isinstance(body, list):
+            text = "\n".join(f"• {x}" if not str(x).startswith("•") else str(x) for x in body)
+        else:
+            text = str(body)
+        phs.append({"idx": 1, "text_content": text})
+    img_prompt = slide_dict.get("image_prompt") or slide_dict.get("image")
+    if img_prompt and isinstance(img_prompt, str):
+        phs.append({"idx": 2, "image_prompt": img_prompt})
+    return phs
+
+
+def _normalize_slide(raw_slide: Any, index: int, default_layout: str) -> dict[str, Any]:
+    """単一スライドの辞書を SlideNode 互換に正規化する。"""
+    if not isinstance(raw_slide, dict):
+        raw_slide = {}
+    slide_num = raw_slide.get("slide_number") or raw_slide.get("number") or (index + 1)
+    try:
+        slide_num = int(slide_num)
+    except (ValueError, TypeError):
+        slide_num = index + 1
+    title = str(raw_slide.get("title") or raw_slide.get("heading") or f"スライド {slide_num}")
+    layout = str(raw_slide.get("layout_name") or raw_slide.get("layout") or default_layout)
+    raw_phs = raw_slide.get("placeholders")
+    if isinstance(raw_phs, list) and raw_phs:
+        placeholders = [_normalize_placeholder(p, p_idx) for p_idx, p in enumerate(raw_phs)]
+    else:
+        placeholders = _build_fallback_placeholders(raw_slide, title)
+
+    # タイトルプレースホルダー（idx=0）がなければ先頭に追加
+    if not any(p["idx"] == 0 for p in placeholders):
+        placeholders.insert(0, {"idx": 0, "text_content": title})
+
+    v_type = str(raw_slide.get("visual_type") or "auto")
+    valid_types = {"auto", "none", "summary", "timeline", "process", "comparison", "kpi", "matrix", "risk"}
+    if v_type not in valid_types:
+        v_type = "auto"
+
+    c_theme = str(raw_slide.get("color_theme") or "corporate")
+    valid_themes = {"light", "dark", "corporate", "creative", "warm", "cool"}
+    if c_theme not in valid_themes:
+        c_theme = "corporate"
+
+    refs = raw_slide.get("coverage_refs") or raw_slide.get("source_references") or []
+    if isinstance(refs, str):
+        refs = [refs]
+
+    return {
+        "slide_number": slide_num,
+        "title": title,
+        "layout_name": layout,
+        "placeholders": placeholders,
+        "visual_type": v_type,
+        "visual_variant": str(raw_slide.get("visual_variant") or "auto"),
+        "color_theme": c_theme,
+        "accent_color_hex": raw_slide.get("accent_color_hex"),
+        "coverage_refs": list(refs) if isinstance(refs, list) else [],
+    }
+
+
+def _normalize_presentation_dsl_data(
+    data: dict[str, Any], default_layout: str = "Title and Content"
+) -> dict[str, Any]:
+    """GPTが返したスライド構成案辞書を PresentationDSLSchema 互換に正規化する。"""
+    if not isinstance(data, dict):
+        data = {}
+    title = (
+        data.get("presentation_title")
+        or data.get("title")
+        or data.get("deck_title")
+        or data.get("topic")
+        or "プレゼンテーション資料"
+    )
+    title_str = str(title).strip()[:30]  # Pydantic max_length=30 制約を満たす
+
+    raw_slides = (
+        data.get("slides")
+        or data.get("slide_list")
+        or data.get("pages")
+        or data.get("deck")
+        or []
+    )
+    if not isinstance(raw_slides, list):
+        raw_slides = [raw_slides]
+
+    slides = [_normalize_slide(s, idx, default_layout) for idx, s in enumerate(raw_slides)]
+    return {
+        "presentation_title": title_str,
+        "slides": slides,
+    }
+
+
 def _parse_source_brief(raw_text: str) -> PresentationSourceBrief:
     """GPTの応答テキストからPresentationSourceBriefをパースする。"""
     data = _safe_json_loads(raw_text)
-    return PresentationSourceBrief.model_validate(data)
+    normalized = _normalize_source_brief_data(data)
+    return PresentationSourceBrief.model_validate(normalized)
 
 
-def _parse_presentation_dsl(raw_text: str) -> PresentationDSLSchema:
+def _parse_presentation_dsl(
+    raw_text: str, default_layout: str = "Title and Content"
+) -> PresentationDSLSchema:
     """GPTの応答テキストからPresentationDSLSchemaをパースする。"""
     data = _safe_json_loads(raw_text)
-    return PresentationDSLSchema.model_validate(data)
+    normalized = _normalize_presentation_dsl_data(data, default_layout=default_layout)
+    return PresentationDSLSchema.model_validate(normalized)
 
 
 def _generate_dalle_image(runtime: AzureRuntime, prompt: str, output_path: str) -> bool:
@@ -244,6 +402,20 @@ class AzurePPTXAgent:
         prompt = (
             "これまでの会話、添付ファイル、検索結果を統合し、PowerPoint資料を作るための材料台帳 (source brief JSON) を作成してください。\n"
             "事実と推測を分け、スライド構成に必要な数値・日付・比較軸・出典候補を漏れなく整理してください。\n\n"
+            "【出力JSONフォーマット厳守】\n"
+            "必ず以下のキー構造を持つ単一のJSONオブジェクトを出力してください。\n"
+            "```json\n"
+            "{\n"
+            '  "core_request": "ユーザーの主目的・作成したいテーマ",\n'
+            '  "audience": "想定読者・対象者",\n'
+            '  "source_inventory": ["会話履歴", "Web検索結果"],\n'
+            '  "key_facts": ["事実1 (日付・数値・固有名詞を含む具体的な内容)", "事実2..."],\n'
+            '  "evidence_notes": ["事実1の根拠や出典メモ", "事実2の根拠メモ..."],\n'
+            '  "coverage_requirements": ["スライドで網羅すべき必須要件1", "要件2..."],\n'
+            '  "source_coverage_units": ["最小情報単位1", "最小情報単位2..."],\n'
+            '  "recommended_storyline": ["第1章: 背景", "第2章: 進化点", "第3章: 結論"]\n'
+            "}\n"
+            "```\n\n"
             + (f"【会話ログ抜粋】\n{conversation_excerpt}\n\n" if conversation_excerpt else "")
             + (f"【添付ファイル情報】\n{attachment_summary}\n\n" if attachment_summary else "")
             + (f"【Web検索リサーチ結果】\n{research_context}\n\n" if research_context else "")
@@ -262,7 +434,7 @@ class AzurePPTXAgent:
             input_messages=messages,
             instructions=(
                 "あなたは資料作成前の編集長です。会話、添付、検索結果を統合し、"
-                "スライド構成に使える材料台帳を完全なJSONで作成してください。"
+                "指定されたJSONフォーマットに適合する材料台帳を出力してください。"
             ),
             max_output_tokens=16384,
             temperature=0.1,
@@ -295,21 +467,55 @@ class AzurePPTXAgent:
         has_template: bool,
     ) -> PresentationDSLSchema:
         min_body_slides = _minimum_body_slide_count(brief)
+        default_layout = "Title and Content"
+        if layouts_info:
+            body_layouts = [
+                name
+                for name in layouts_info
+                if not any(k in name.lower() for k in ("title_slide", "cover", "表紙", "end", "裏表紙"))
+            ]
+            default_layout = body_layouts[0] if body_layouts else next(iter(layouts_info.keys()))
+
         template_instruction = ""
         if has_template and layouts_info:
             allowed_layouts = ", ".join(f"'{name}'" for name in layouts_info.keys())
             template_instruction = (
                 "\n\n【利用可能なスライドレイアウト情報】\n"
                 f"各スライドの 'layout_name' は必ず次の候補から選択してください: {allowed_layouts}\n"
+                f"標準的な本文スライドの推奨レイアウト: '{default_layout}'\n"
                 "表紙用・裏表紙用のレイアウトは本文スライドに使用しないでください。\n"
                 "'placeholders' では、指定したレイアウトに定義された 'idx' だけを指定してください。\n"
             )
 
         prompt = (
             "以下の source brief を唯一の材料台帳として、最高品質のスライド構成案JSONを出力してください。\n"
-            f"本文スライドは最低 {min_body_slides} 枚作成してください。\n"
-            "各スライドにはタイトル、本文プレースホルダーへのテキスト（箇条書きは改行区切り）、"
-            "適切なビジュアル要素（visual_type: timeline/process/comparison/kpi/matrix/risk/summary/auto）を指定してください。\n"
+            f"本文スライドは最低 {min_body_slides} 枚作成してください。\n\n"
+            "【出力JSONフォーマット厳守】\n"
+            "必ず以下のスキーマ構造に完全に一致するJSONのみを出力してください。\n"
+            "```json\n"
+            "{\n"
+            '  "presentation_title": "プレゼン全体のタイトル（30文字以内）",\n'
+            '  "slides": [\n'
+            "    {\n"
+            '      "slide_number": 1,\n'
+            '      "title": "スライドタイトル",\n'
+            f'      "layout_name": "{default_layout}",\n'
+            '      "placeholders": [\n'
+            '        {"idx": 0, "text_content": "スライドタイトル"},\n'
+            '        {"idx": 1, "text_content": "本文や箇条書きテキスト（改行区切り）"}\n'
+            "      ],\n"
+            '      "visual_type": "summary",\n'
+            '      "visual_variant": "cards_2x2",\n'
+            '      "color_theme": "corporate",\n'
+            '      "coverage_refs": ["R1", "関連事実"]\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "```\n"
+            "※注意:\n"
+            "- 最上位のタイトルキーは必ず 'presentation_title' です（30文字以内）。\n"
+            "- 各スライドには必ず 'layout_name' と 'placeholders' の配列を含めてください。\n"
+            "- 'placeholders' には各プレースホルダーの 'idx' と 'text_content' を指定してください。\n"
             + template_instruction
             + f"\n\n【source brief】\n{_brief_to_text(brief)}"
         )
@@ -319,13 +525,13 @@ class AzurePPTXAgent:
         result = generate_response(
             runtime=self.runtime,
             input_messages=messages,
-            instructions="あなたは一流のプレゼンテーションデザイナーです。Pydantic PresentationDSLSchema に完全に適合するJSONを出力してください。",
+            instructions="あなたは一流のプレゼンテーションデザイナーです。指定されたJSONフォーマットに完全に適合するスライド構成JSONを出力してください。",
             max_output_tokens=16384,
             temperature=0.2,
             response_mime_type="application/json",
             structured_output_name="presentation_dsl",
         )
-        dsl = _parse_presentation_dsl(result.text)
+        dsl = _parse_presentation_dsl(result.text, default_layout=default_layout)
         _attach_reference_usage(brief, dsl)
         state_manager.add_debug_log(
             f"[AzurePPTXAgent] Structure generated: title='{dsl.presentation_title}', slides={len(dsl.slides)}"

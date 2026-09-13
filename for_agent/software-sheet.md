@@ -1042,14 +1042,13 @@ graph LR
     * `main.py` において、回答完了後もタスク分割や思考過程をいつでも振り返れるよう、メッセージデータに `thought_log` を永続化し、チャット履歴描画ループに `st.expander("🧠 思考プロセス (Thinking Process)", expanded=False)` を追加。
     * アプリケーションの動作再現性と長期稼働安定性を高めるため、`pyproject.toml` および `requirements.txt` の全依存パッケージ（22個＋build）を動作検証済みの実績バージョン（`==`）に統一・完全固定。
 * **2026-09-13**
-  * GPT（Azure OpenAI）モデルにおける PowerPoint (.pptx) レポート自動生成対応:
-    * `azure_pptx_agent.py` を新設し、GPTモデル（`gpt-5.3-codex`, `gpt-5.6`, `gpt-6` 等）選択時でも PowerPoint ネイティブスライド自動生成パイプラインを自律実行可能に拡張。
-    * GPT の Structured Outputs（`PresentationSourceBrief`, `PresentationDSLSchema`, `PlaceholderContent`）による構造化スライド構成生成と、Playwright による幾何学溢れバリデーションおよび要約自己修復ループ（最大3回）を統合。
-    * Azure OpenAI DALL-E 3 によるスライド挿絵生成、および DALL-E 未設定時の安全な画像スキップ・フォールバック機構を導入。
-    * `azure_runtime.py` に `AZURE_OPENAI_DALLE_DEPLOYMENT` 設定を追加。
+  * GPT（Azure OpenAI）モデルにおける PowerPoint (.pptx) レポート自動生成対応およびスキーマ堅牢化:
+    * `src/gp_chat/azure_pptx_agent.py` を新設し、GPT（gpt-5.6 等）を用いた自律 PowerPoint スライド生成パイプラインを実装。
+    * GPT出力の表記ゆれ（`presentation_title` に対する `title`、スライド内 `placeholders` 欠落時の `content`/`bullets` からの自動構成、`layout_name` 欠落時の安全フォールバック、タイトル30文字上限トリミング等）を吸収する `_normalize_presentation_dsl_data` および `_normalize_source_brief_data` を実装。
+    * プロンプトに厳密な JSON スキーマ例示（テンプレートレイアウト候補・推奨レイアウトを含む）を注入し、生成精度と適合性を向上。
     * `main.py` の `_resolve_mode_name` および `_run_azure_mode` に `report_pptx` モードディスパッチを追加し、UI へのダウンロードボタン連携を実装。
     * `pptx_agent.py` の物理スライド描画処理を `save_physical_presentation` としてモジュールレベル関数化し、Gemini / Azure 間で共通利用できるようにリファクタリング。
-    * `tests/test_azure_pptx_agent.py` を新設し、Pylint 10.00/10 および単体テスト全件合格を確認。
+    * `tests/test_azure_pptx_agent.py` を新設・拡充し、Pylint 10.00/10 および単体テスト全件合格（25件）を確認。
 * **2026-09-13**
   * PDFレポートにおける絵文字表示最適化（Twemoji/SVG）およびマルチモーダルVLM視覚検査パイプラインの導入:
     * 絵文字（🤖, 💡, 📊 等）が Chromium ヘッドレス（`--print-to-pdf`）で文字化け（.notdef / 豆腐文字）を起こす問題を解消するため、`report_visual_inspector.py` を新設。
