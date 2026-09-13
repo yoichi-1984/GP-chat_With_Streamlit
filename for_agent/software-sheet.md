@@ -1047,8 +1047,8 @@ graph LR
     * GPT出力の表記ゆれ（`presentation_title` に対する `title`、スライド内 `placeholders` 欠落時の `content`/`bullets` からの自動構成、`layout_name` 欠落時の安全フォールバック、タイトル30文字上限トリミング等）を吸収する `_normalize_presentation_dsl_data` および `_normalize_source_brief_data` を実装。
     * プロンプトに厳密な JSON スキーマ例示（テンプレートレイアウト候補・推奨レイアウトを含む）を注入し、生成精度と適合性を向上。
     * `main.py` の `_resolve_mode_name` および `_run_azure_mode` に `report_pptx` モードディスパッチを追加し、UI へのダウンロードボタン連携を実装。
-    * `pptx_agent.py` の物理スライド描画処理を `save_physical_presentation` としてモジュールレベル関数化し、Gemini / Azure 間で共通利用できるようにリファクタリング。
-    * `tests/test_azure_pptx_agent.py` を新設・拡充し、Pylint 10.00/10 および単体テスト全件合格（25件）を確認。
+    * `pptx_agent.py` の物理スライド描画処理を `save_physical_presentation` としてモジュールレベル関数化し、Gemini / Azure 間で共通利用できるようにリファクタリング。関数配置を `class PPTXAgent` の直前へ是正し、Gemini 側の `PPTXAgent.generate_presentation_pipeline` クラスメソッド整合性を完全に担保。
+    * `tests/test_azure_pptx_agent.py` を新設・拡充し、Pylint 10.00/10 および単体テスト全件合格（26件）を確認。
 * **2026-09-13**
   * PDFレポートにおける絵文字表示最適化（Twemoji/SVG）およびマルチモーダルVLM視覚検査パイプラインの導入:
     * 絵文字（🤖, 💡, 📊 等）が Chromium ヘッドレス（`--print-to-pdf`）で文字化け（.notdef / 豆腐文字）を起こす問題を解消するため、`report_visual_inspector.py` を新設。

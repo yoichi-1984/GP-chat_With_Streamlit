@@ -207,6 +207,13 @@ class TestAzurePPTXAgent(unittest.TestCase):
         self.assertEqual(brief.audience, "開発者")
         self.assertEqual(len(brief.key_facts), 2)
         self.assertEqual(len(brief.source_coverage_units), 2)
+    def test_pptx_agent_has_generate_presentation_pipeline(self):
+        # Gemini向け PPTXAgent が generate_presentation_pipeline を保持していることを検証
+        from gp_chat import pptx_agent
+        self.assertTrue(hasattr(pptx_agent.PPTXAgent, "generate_presentation_pipeline"))
+        self.assertTrue(callable(getattr(pptx_agent.PPTXAgent, "generate_presentation_pipeline")))
+        self.assertTrue(hasattr(pptx_agent, "save_physical_presentation"))
+        self.assertTrue(callable(pptx_agent.save_physical_presentation))
 
 
 if __name__ == "__main__":
