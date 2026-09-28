@@ -1024,7 +1024,7 @@ graph LR
 - `google-genai==2.22.0`（Gemini 3.8 Flash 公式対応、遅延インポート高速化）
 - `google-auth==2.57.1`
 - `openai==3.8.0`（OpenAI Python SDK v3.x）
-- `httpx2==2.12.0` および `h2==4.4.1`（HTTP/2 多重化通信エンジン）
+- `httpx2[http2]==2.12.0` および `h2==4.4.1`（HTTP/2 多重化通信エンジン）
 - `python-pptx==1.0.2`, `playwright==1.61.0`（PowerPoint ネイティブ生成 & 幾何学バリデーション）
 - `python-calamine==0.6.2`, `openpyxl==3.1.5`, `python-docx==1.2.0`（Officeファイル高速パース）
 - `pillow==11.1.0`, `matplotlib==3.10.8`, `pandas==2.3.3`, `pylint==4.0.4` 等
@@ -1033,6 +1033,11 @@ graph LR
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-09-28**
+  * 依存パッケージ定義における `httpx2[http2]` 明示指定への適正化:
+    * 課題: HTTP/2 通信エンジンである `httpx2` において、HTTP/2 機能はオプショナル依存関係（`Provides-Extra: http2`）として提供されており、`pyproject.toml` および `requirements.txt` の `httpx2==2.12.0` 単体記述では依存意図が不明瞭であった。
+    * 解決策: PEP 508 に準拠し、依存定義を `httpx2[http2]==2.12.0` に適正化。実体ライブラリ `h2==4.4.1` との連動関係を明示化。
+    * 検証: `pip check`（Exit Code 0）および全33件の単体テスト合格を確認。
 * **2026-09-28**
   * GPTモデル（Responses API）におけるPDF添付・ネイティブマルチモーダル推論の完全解放:
     * 課題: GPT-6 / GPT-5.6 / GPT-5.3-codex などの Azure OpenAI モデル選択時に PDF を添付すると、旧来の Chat Completions 時代の制約による `AzureContextBuildError` 例外が送出され、処理が停止していた。
