@@ -249,9 +249,16 @@ def _build_attachment_content_items(uploaded_files) -> tuple[list[dict[str, obje
             continue
 
         if mime_type == "application/pdf" or file_ext == ".pdf":
-            raise AzureContextBuildError(
-                f"PDF attachments are not supported for high-compatibility Azure fallback: {filename}"
+            b64_pdf = base64.b64encode(file_bytes).decode("utf-8")
+            content_items.append(
+                {
+                    "type": "input_file",
+                    "filename": filename,
+                    "file_data": f"data:application/pdf;base64,{b64_pdf}",
+                }
             )
+            meta.append({"name": filename, "type": "pdf", "size": len(file_bytes)})
+            continue
 
         if mime_type.startswith("text/") or file_ext in (
             ".py",
@@ -404,3 +411,4 @@ def build_retry_messages_from_text_history(
         {"role": "user", "content": [{"type": "input_text", "text": user_feedback}]}
     )
     return system_instruction, retry_messages
+

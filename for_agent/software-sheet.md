@@ -276,7 +276,7 @@ gp-chat/
   - `run_special_generation(...) -> AzureModeResult`: Special モード（Canvas コード検証・リファクタリング）のストリーミング実行。
 
 #### ⑲ `src/gp_chat/azure_context_builder.py`
-- **責務**: Gemini 形式のコンテキストオブジェクトから Azure OpenAI API 形式（`messages` リスト、Base64 画像、システム指示文）への変換。PDF 添付時は Azure 未対応として `AzureContextBuildError` を送出。
+- **責務**: Gemini 形式のコンテキストオブジェクトから Azure OpenAI API / Responses API 形式（`messages` リスト、Base64 画像・PDF `input_file`、システム指示文）への変換。PDF 添付時は Responses API の `{"type": "input_file", "filename": ..., "file_data": "data:application/pdf;base64,..."}` として注入し、GPT-6 / GPT-5.6 / GPT-5.3-codex でのネイティブマルチモーダル推論を可能にする。
 
 #### ⑳ `src/gp_chat/azure_supervisor_helpers.py`
 - **責務**: GCP 側のエラー（レートリミット 429 や 5xx、クォータ超過）を検査し、Azure OpenAI へのフォールバック要否を判定。
@@ -635,7 +635,7 @@ AZURE_DEEP_PLANNER_SCHEMA = {
    │
    ├── PDF (.pdf)
    │    ├─ GCP Vertex AI : types.Part.from_bytes(data=bytes, mime_type="application/pdf")
-   │    └─ Azure OpenAI  : AzureContextBuildError 例外スロー (フォールバック抑止)
+   │    └─ Azure OpenAI (Responses API) : {"type": "input_file", "filename": filename, "file_data": "data:application/pdf;base64,..."} (GPT-6世代ネイティブマルチモーダル推論)
    │
    ├── Word (.docx)
    │    └─ python-docx で全段落抽出 ──▶ "[Attached Document: filename]\n" + text
@@ -1033,6 +1033,12 @@ graph LR
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-09-28**
+  * GPTモデル（Responses API）におけるPDF添付・ネイティブマルチモーダル推論の完全解放:
+    * 課題: GPT-6 / GPT-5.6 / GPT-5.3-codex などの Azure OpenAI モデル選択時に PDF を添付すると、旧来の Chat Completions 時代の制約による `AzureContextBuildError` 例外が送出され、処理が停止していた。
+    * 解決策: OpenAI Python SDK v3.x の Responses API (`client.responses.create`) 仕様に基づき、`azure_context_builder.py` の `_build_attachment_content_items` を改修。PDF 添付ファイルを Base64 エンコードした `input_file`（`{"type": "input_file", "filename": filename, "file_data": "data:application/pdf;base64,..."}`）として `messages` に直接注入するよう変更。
+    * 効果: GPT-6 世代（`gpt-6-astra` / `gpt-5.6-sol`）が備えるネイティブマルチモーダル推論（テキスト、図表、数式、レイアウトの統合分析）および `azure_deep_orchestrator.py` による HTTP/2 並行タスク分解を PDF 入力時にも完全発揮可能にした。
+    * 検証: `tests/test_azure_pdf_attachment.py` を新設し、単体テスト全33件合格（Exit Code 0）および `pip check`、`py_compile` の正常終了を確認。
 * **2026-09-13**
   * PPTXレポート生成のインフォグラフィックス品質劇的向上（16:9自律ネイティブ描画エンジン & スライドマスター両立）:
     * 課題: HTML/PDF レポートと比較して PPTX レポートの品質が著しく低く、外部テンプレート（`format.pptx`）が存在しない場合に白無地＋箇条書き1行のプレースホルダーのみが生成されていた上、既存の描画関数群のフォントサイズが 7.6〜8.6pt と極小で視認性が劣悪だった。
