@@ -157,7 +157,7 @@ def run_report_generation(
         max_output_tokens=max_output_tokens,
         temperature=0.2,
     )
-    if "gemini-3" in model_id:
+    if "gemini" in model_id:
         gen_config.thinking_config = types.ThinkingConfig(
             thinking_level=types.ThinkingLevel.LOW,
             include_thoughts=False,

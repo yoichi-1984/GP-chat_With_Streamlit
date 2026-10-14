@@ -551,11 +551,12 @@ def crop_user_image_with_llm(client, image_bytes: bytes, image_mime_type: str, i
             temperature=0.1,
             response_mime_type="application/json",
             response_schema=CropAreaSchema,
+            thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=False),
         )
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=image_mime_type)
         user_prompt = f"指示: 「{instruction}」\n上記指示に合致する要素の座標範囲 [ymin, xmin, ymax, xmax] をJSONで出力してください。"
         result = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-4-argon",
             contents=[image_part, user_prompt],
             config=gen_config
         )
@@ -634,13 +635,13 @@ def export_pptx_to_slide_images(pptx_path: str, output_dir: str) -> List[str]:
     return sorted(image_paths, key=slide_sort_key)
 
 
-def run_visual_quality_audit(client, pptx_path: str, temp_dir: str, model_id: str = "gemini-3.8-flash") -> List[SlideVisualAudit]:
+def run_visual_quality_audit(client, pptx_path: str, temp_dir: str, model_id: str = "gemini-4-argon") -> List[SlideVisualAudit]:
     """生成済みPPTXを画像化し、VLMで視覚品質を検査する。"""
     audit_dir = os.path.join(temp_dir, "visual_audit")
     image_paths = export_pptx_to_slide_images(pptx_path, audit_dir)
     if not image_paths:
         return []
-    audit_model = model_id if "gemini" in model_id else "gemini-3.8-flash"
+    audit_model = model_id if "gemini" in model_id else "gemini-4-argon"
     audits: List[SlideVisualAudit] = []
     prompt = (
         "You are a strict PowerPoint visual QA reviewer. Inspect this slide image only.\n"
@@ -655,6 +656,7 @@ def run_visual_quality_audit(client, pptx_path: str, temp_dir: str, model_id: st
         temperature=0.0,
         response_mime_type="application/json",
         response_schema=SlideVisualAudit,
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=False),
     )
     for index, image_path in enumerate(image_paths, start=1):
         try:
@@ -3397,10 +3399,11 @@ class PPTXAgent:
                     temperature=0.2,
                     response_mime_type="application/json",
                     response_schema=PlaceholderContent,
+                    thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH, include_thoughts=False),
                 )
                 correction_result = llm_router.generate_content_with_route(
                     llm_clients=self.llm_clients,
-                    model_id="gemini-3.8-flash",
+                    model_id="gemini-4-argon",
                     contents=[types.Content(role="user", parts=[types.Part.from_text(text=retry_prompt)])],
                     config=correction_config,
                     mode="pptx_correction",
@@ -3490,7 +3493,7 @@ class PPTXAgent:
         self,
         chat_history: List[dict],
         session_id: str,
-        model_id: str = "gemini-3.8-flash",
+        model_id: str = "gemini-4-argon",
         user_images: List[dict] = None,
         materialized_contents: Optional[List[Any]] = None,
         materialized_system_instruction: str = "",

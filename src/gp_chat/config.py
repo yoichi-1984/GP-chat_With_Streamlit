@@ -61,9 +61,9 @@ SESSION_STATE_DEFAULTS = {
     "multi_code_enabled": True,
     "stop_generation": False,
     "canvas_key_counter": 0,
-    "reasoning_effort": "high",
+    "reasoning_effort": "medium",
     "debug_logs": [],
-    "current_model_id": "gemini-3.8-flash", # UIで切り替え可能にする
+    "current_model_id": "gemini-4-argon", # UIで切り替え可能にする
     "enable_google_search": True, # Grounding機能用フラグ
     "enable_more_research": False, # 深掘り調査モード用フラグ
     "uploaded_file_queue": [], # 送信待ちのファイルリスト
@@ -76,15 +76,9 @@ SESSION_STATE_DEFAULTS = {
 
 # 選択可能なモデルリスト
 AVAILABLE_MODELS = [
+    "gemini-4-argon",
     "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-pro-preview",
     "gemini-3.5-flash-lite",
-    "gpt-5.3-codex",
-    "gpt-5.6",
-    "gpt-6",
 ]
 
 # Azure OpenAI へ直接ルーティングするモデル一覧（新設）
@@ -95,7 +89,7 @@ class UITexts:
     APP_TITLE = "🤖GP-Chat 汎用AIアプリ with Gemini" # タイトルも汎用的に変更
     SIDEBAR_HEADER = "設定"
     RESET_BUTTON_LABEL = "会話履歴をリセット"
-    CODEX_MINI_INFO = "`Gemini 3 は最大1Mまでのトークンを使用可能です` ."
+    CODEX_MINI_INFO = "`Gemini は最大1Mまでのトークンを使用可能です` ."
     HISTORY_SUBHEADER = "会話履歴 (JSON)"
     DOWNLOAD_HISTORY_BUTTON = "会話履歴をダウンロード"
     UPLOAD_HISTORY_LABEL = "JSONで会話を再開"

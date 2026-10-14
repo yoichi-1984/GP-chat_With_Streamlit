@@ -81,7 +81,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             label="Target Model",
             options=config.AVAILABLE_MODELS,
             index=model_idx,
-            help="Gemini 3 が 404 になる場合は 2.0 Flash 等で接続を確認してください。",
+            help="モデルが 404 になる場合は別のモデルで接続を確認してください。",
             disabled=is_generating,
             key=f"model_sel_{c_key}" # カウンター付きキー
         )
@@ -101,7 +101,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         is_more_research = st.session_state.get('enable_more_research', False)
 
         effort_options = ['high', 'medium', 'low', 'deep']
-        curr_effort = 'high' if (is_more_research or is_any_report_mode) else st.session_state.get('reasoning_effort', 'high')
+        curr_effort = 'high' if (is_more_research or is_any_report_mode) else st.session_state.get('reasoning_effort', 'medium')
         effort_idx = effort_options.index(curr_effort) if curr_effort in effort_options else 0
 
         sel_effort = st.selectbox(
@@ -112,7 +112,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             help="high: 標準の推論. medium: やや抑えた推論. low: 高速応答. deep: 推論特化モード (深い自己批判と多角的な仮説検証を実行)" + (" (Locked to 'high' in More Research or Report Mode)" if (is_more_research or is_any_report_mode) else ""),
             key=f"effort_sel_{c_key}" 
         )
-        if not is_more_research and not is_any_report_mode and sel_effort != st.session_state.get('reasoning_effort', 'high'):
+        if not is_more_research and not is_any_report_mode and sel_effort != st.session_state.get('reasoning_effort', 'medium'):
             st.session_state['reasoning_effort'] = sel_effort
             st.rerun()
 

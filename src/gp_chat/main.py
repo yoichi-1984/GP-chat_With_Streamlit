@@ -419,7 +419,7 @@ def run_chatbot_app():
     
     project_id = os.getenv(config.GCP_PROJECT_ID_NAME)
     location = os.getenv(config.GCP_LOCATION_NAME, "global") 
-    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-3.8-flash"))
+    model_id = st.session_state.get('current_model_id', os.getenv(config.GEMINI_MODEL_ID_NAME, "gemini-4-argon"))
     azure_rt = azure_runtime.load_azure_runtime_from_env(
         bootstrap_env_path=selected_env_file,
         logger=state_manager.add_debug_log,
@@ -645,7 +645,7 @@ def run_chatbot_app():
             "enable_more_research": st.session_state.get('enable_more_research', False),
             "enable_report_pdf": st.session_state.get('enable_report_pdf', False),
             "enable_google_search": st.session_state.get('enable_google_search', False),
-            "reasoning_effort": st.session_state.get('reasoning_effort', 'high'),
+            "reasoning_effort": st.session_state.get('reasoning_effort', 'medium'),
             "auto_plot_enabled": st.session_state.get('auto_plot_enabled', False),
             "current_model_id": st.session_state.get('current_model_id'),
             "selected_env_file": st.session_state.get('selected_env_file'),
@@ -919,11 +919,13 @@ def run_chatbot_app():
                 target_messages = st.session_state['messages']
 
             is_more_research = st.session_state.get('enable_more_research', False) and not is_special_mode
-            effort = st.session_state.get('reasoning_effort', 'high')
+            effort = st.session_state.get('reasoning_effort', 'medium')
             is_report_pdf = st.session_state.get('enable_report_pdf', False) and not is_special_mode
             is_report_pptx = st.session_state.get('enable_report_pptx', False) and not is_special_mode
             is_report_mode = is_report_pdf or is_report_pptx
             is_deep_reasoning = (effort == 'deep') and not is_more_research and not is_report_mode and not is_special_mode
+            if is_more_research or is_deep_reasoning:
+                model_id = "gemini-4-argon"
             mode_name = _resolve_mode_name(
                 is_special_mode=is_special_mode,
                 is_more_research=is_more_research,
@@ -978,9 +980,15 @@ def run_chatbot_app():
                 )
             
             if is_more_research or is_deep_reasoning:
+                model_id = "gemini-4-argon"
                 t_level = types.ThinkingLevel.HIGH
             else:
-                t_level = types.ThinkingLevel.HIGH if effort == 'high' else types.ThinkingLevel.LOW
+                effort_map = {
+                    "high": types.ThinkingLevel.HIGH,
+                    "medium": types.ThinkingLevel.MEDIUM,
+                    "low": types.ThinkingLevel.LOW,
+                }
+                t_level = effort_map.get(effort, types.ThinkingLevel.MEDIUM)
 
             tools_config = []
             enable_search = st.session_state.get('enable_google_search', False)
@@ -1004,7 +1012,7 @@ def run_chatbot_app():
                     max_output_tokens=max_tokens_val,
                     tools=tools_config
                 )
-                if "gemini-3" in model_id:
+                if "gemini" in model_id:
                     gen_config.thinking_config = types.ThinkingConfig(
                         thinking_level=t_level,
                         include_thoughts=True

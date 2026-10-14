@@ -30,7 +30,7 @@ GP-Chat は、単一のAIモデルや単純なチャットUIの制約を克服�
 
 ### 1.2 コア設計原則 (Core Architecture Principles)
 1. **ハイブリッド＆ゼロダウンタイム (Hybrid & Zero Downtime)**:
-   - GCP Vertex AI (最新フラッグシップ `gemini-3.8-flash` を主軸) を主系とし、API レートリミット（429）や障害発生時には即座に Azure OpenAI へ自動フォールバックする。
+   - GCP Vertex AI (最新フラッグシップ `gemini-4-argon` を主軸) を主系とし、API レートリミット（429）や障害発生時には即座に Azure OpenAI へ自動フォールバックする。
    - 特定のモデル群（`gpt-5.3-codex`, `gpt-5.6`, `gpt-6`）は最初から Azure への直接接続（GCPバイパス）を行い、最適なモデル適材適所を実現する。
 2. **決定論的 UI 制御 & 厳格な排他ロック (Deterministic UI & Mutual Exclusion)**:
    - Streamlit の再実行（Rerun）モデルにおいて、競合するモード（例: 徹底調査とDeep Reasoning、PDFレポートとPPTXレポート）の同時選択をサイドバーの真理値マトリクスで完全に排他・連動ロックする。
@@ -144,9 +144,9 @@ gp-chat/
   - `EXECUTION_TIMEOUT = 30`: Pythonコード実行タイムアウト（秒）。
   - `LLM_RETRYABLE_STATUS_CODES = (408, 429, 500, 502, 503, 504)`: リトライ対象ステータスコード。
   - `PRIORITY_APP_RETRY_COUNT = 3`, `PRIORITY_APP_RETRY_WAIT_SECONDS = (2.0, 4.0, 8.0)`: リトライ設定。
-  - `AVAILABLE_MODELS`: 選択可能な全9モデルのリスト（`"gemini-3.8-flash"`, `"gemini-3.7-flash"`, `"gemini-3.6-flash"`, `"gemini-3.5-flash"`, `"gemini-3.1-pro-preview"`, `"gemini-3.5-flash-lite"`, `"gpt-5.3-codex"`, `"gpt-5.6"`, `"gpt-6"`）。
+  - `AVAILABLE_MODELS`: 選択可能な全3モデルのリスト（`"gemini-4-argon"`, `"gemini-3.8-flash"`, `"gemini-3.5-flash-lite"`）。
   - `AZURE_DIRECT_MODELS`: Azure OpenAI へ直接ルーティング（GCPバイパス）するモデルタプル（`("gpt-5.3-codex", "gpt-5.6", "gpt-6")`）。
-  - `SESSION_STATE_DEFAULTS`: 初期 `st.session_state` 辞書（`current_model_id` のデフォルトは `"gemini-3.8-flash"`, `reasoning_effort` は `"high"`）。
+  - `SESSION_STATE_DEFAULTS`: 初期 `st.session_state` 辞書（`current_model_id` のデフォルトは `"gemini-4-argon"`, `reasoning_effort` は `"medium"`）。
   - `AZURE_DEEP_MAX_CONCURRENCY`: GPT-5.6 / GPT-6 並行サブタスクの最大同時実行数（環境変数 `AZURE_DEEP_MAX_CONCURRENCY`、デフォルト 3）。
   - `AZURE_DEEP_PLANNER_PROMPT`: タスク分解・実行計画立案用システムプロンプト。
   - `AZURE_DEEP_PLANNER_SCHEMA`: タスク分解出力用 JSON スキーマ（`needs_parallel_subtasks`, `plan_summary`, `subtasks`）。
@@ -465,8 +465,8 @@ AZURE_DEEP_PLANNER_SCHEMA = {
 ```json
 {
   "system_role": "You are Gemini, a helpful and versatile AI assistant...",
-  "current_model_id": "gemini-3.8-flash",
-  "reasoning_effort": "high",
+  "current_model_id": "gemini-4-argon",
+  "reasoning_effort": "medium",
   "enable_google_search": true,
   "enable_more_research": false,
   "report_mode_pdf": false,
@@ -515,8 +515,8 @@ AZURE_DEEP_PLANNER_SCHEMA = {
 | :--- | :---: | :--- | :--- | :--- |
 | `messages` | `list[dict]` | `[]` | ユーザー送信、AIストリーミング完了、会話分岐 (※assistantメッセージ内に `thought_log` を永続化) | `main.py`, `state_manager.py`, 全エージェント |
 | `system_role_defined` | `bool` | `False` | 初回プロンプト確定ボタン押下 | `main.py`, `sidebar.py` |
-| `current_model_id` | `str` | `gemini-3.8-flash` | サイドバーのモデル選択セレクトボックス | `main.py`, `sidebar.py`, `llm_router.py` |
-| `reasoning_effort` | `str` | `high` | サイドバーの推論レベルラジオボタン | `main.py`, `reasoning_agent.py` |
+| `current_model_id` | `str` | `gemini-4-argon` | サイドバーのモデル選択セレクトボックス | `main.py`, `sidebar.py`, `llm_router.py` |
+| `reasoning_effort` | `str` | `medium` | サイドバーの推論レベルラジオボタン | `main.py`, `reasoning_agent.py` |
 | `enable_google_search` | `bool` | `True` | サイドバーの Web検索チェックボックス | `main.py`, `utils.py`, `research_agent.py` |
 | `enable_more_research` | `bool` | `False` | サイドバーの徹底調査トグル | `main.py`, `sidebar.py`, `research_agent.py` |
 | `report_mode_pdf` | `bool` | `False` | サイドバーの レポート機能(pdf) トグル | `main.py`, `sidebar.py`, `report_agent.py` |
@@ -684,7 +684,7 @@ def calculate():
 
 ### 7.1 二重化クライアント制御フロー (`llm_router.py`)
 
-最新フラッグシップモデル `gemini-3.8-flash` をはじめとする GCP Vertex AI 呼び出しは、`google-genai==2.22.0`（遅延インポート高速化・安定通信）を基盤に、Standard / Priority の二重化クライアント制御と自動フォールバックを備えています。
+最新フラッグシップモデル `gemini-4-argon` をはじめとする GCP Vertex AI 呼び出しは、`google-genai==2.22.0`（遅延インポート高速化・安定通信）を基盤に、Standard / Priority の二重化クライアント制御と自動フォールバックを備えています。
 
 ```mermaid
 sequenceDiagram
@@ -1003,7 +1003,7 @@ graph LR
   - `GCP_PROJECT_ID`: Google Cloud プロジェクトID。
   - `GCP_LOCATION`: Vertex AI のリージョン（デフォルト: `global`）。
   - `GOOGLE_APPLICATION_CREDENTIALS`: サービスアカウントキーのファイルパス。
-  - `GEMINI_MODEL_ID`: デフォルトのモデルID（デフォルト: `gemini-3.8-flash`）。
+  - `GEMINI_MODEL_ID`: デフォルトのモデルID（デフォルト: `gemini-4-argon`）。
   - `MAX_TOKEN`: 生成最大トークン数（デフォルト: `65536`）。
 - **Azure OpenAI**:
   - `AZURE_OPENAI_ENV_FILE`: 外部環境変数ファイルの参照パス（任意）。
@@ -1095,7 +1095,14 @@ graph LR
     * プロンプトに厳密な JSON スキーマ例示（テンプレートレイアウト候補・推奨レイアウトを含む）を注入し、生成精度と適合性を向上。
     * `main.py` の `_resolve_mode_name` および `_run_azure_mode` に `report_pptx` モードディスパッチを追加し、UI へのダウンロードボタン連携を実装。
     * `pptx_agent.py` の物理スライド描画処理を `save_physical_presentation` としてモジュールレベル関数化し、Gemini / Azure 間で共通利用できるようにリファクタリング。関数配置を `class PPTXAgent` の直前へ是正し、Gemini 側の `PPTXAgent.generate_presentation_pipeline` クラスメソッド整合性を完全に担保。
-    * `tests/test_azure_pptx_agent.py` を新設・拡充し、Pylint 10.00/10 および単体テスト全件合格（26件）を確認。
+* **2026-10-14**
+  * 新モデル `gemini-4-argon` 対応および Thinking Level 選択・自動モデル決定仕様の刷新:
+    * システムデフォルトモデルを `gemini-4-argon`、デフォルト思考レベル（`reasoning_effort`）を `medium` に更新。
+    * サイドバー Target Model の選択肢を `gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.5-flash-lite` の3択に再編。
+    * 従来の「high 以外は low とする」二値化処理を撤廃し、`high`, `medium`, `low` の3段階を正確に `types.ThinkingLevel` へマッピングするよう改修。
+    * `thinking_config` の適用条件を `"gemini-3"` 限定から `"gemini"` 限定へ拡張し、Gemini 4 世代（`gemini-4-argon` 等）の思考プロセス・Thinking Level 制御に完全対応。
+    * deep 推論モード（Thinking Level = deep）および自動モデル選択処理（Deep Research、PPTXテキスト溢れ自己修復、VLM視覚品質検査等）において、モデルを `gemini-4-argon`、思考レベルを `high`（`types.ThinkingLevel.HIGH`）に自動適用。タイトル生成は `gemini-3.5-flash-lite` を維持。
+    * 新規単体テスト `tests/test_model_and_thinking_level.py`（Pylint 10.00/10）を配備し、全40件のテスト通過を確認。
 * **2026-09-13**
   * PDFレポートにおける絵文字表示最適化（Twemoji/SVG）およびマルチモーダルVLM視覚検査パイプラインの導入:
     * 絵文字（🤖, 💡, 📊 等）が Chromium ヘッドレス（`--print-to-pdf`）で文字化け（.notdef / 豆腐文字）を起こす問題を解消するため、`report_visual_inspector.py` を新設。
