@@ -5,6 +5,7 @@ import os
 import re
 import json
 import base64
+import concurrent.futures
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
@@ -14,7 +15,7 @@ try:
 except ImportError:
     import state_manager
 
-# pylint: disable=broad-exception-caught,import-outside-toplevel,too-many-locals
+# pylint: disable=broad-exception-caught,import-outside-toplevel,too-many-locals,line-too-long
 
 # --- Data Structures ---
 
@@ -85,10 +86,11 @@ def inject_twemoji_and_fonts(html_content: str) -> str:
 
 # --- 2. Playwright Slide Capturing ---
 
-def capture_slides_as_images(html_path: str, temp_dir: str, max_slides: int = 6) -> List[dict]:
+def capture_slides_as_images(html_path: str, temp_dir: str, max_slides: int = 12) -> List[dict]:
     """
     Playwright を使用して HTML を開き、スライド要素ごとのスクリーンショット（PNG）を撮影する。
     ブラウザ起動失敗時などは空リストを返し、安全にフォールバック可能にする。
+    デフォルトで最大12枚までキャプチャ可能。
     """
     captured = []
     abs_html_path = os.path.abspath(html_path)
@@ -173,7 +175,7 @@ def capture_slides_as_images(html_path: str, temp_dir: str, max_slides: int = 6)
     return captured
 
 
-# --- 3. VLM Response Parser ---
+# --- 3. VLM Response Parser & Batch Helpers ---
 
 def parse_vlm_inspection_response(raw_text: str) -> InspectionResult:
     """
@@ -207,6 +209,47 @@ def parse_vlm_inspection_response(raw_text: str) -> InspectionResult:
         )
 
 
+def chunk_slide_images(slide_images: List[dict], chunk_size: int = 4) -> List[List[dict]]:
+    """
+    スライド画像リストを指定されたサイズ（デフォルト4枚）ごとにチャンク（バッチ）分割する。
+    空リストの場合は空リストを返す。
+    """
+    if not slide_images:
+        return []
+    return [slide_images[i : i + chunk_size] for i in range(0, len(slide_images), chunk_size)]
+
+
+def merge_inspection_results(results: List[InspectionResult]) -> InspectionResult:
+    """
+    複数のバッチ視覚監査結果を1つの InspectionResult にマージ・集約する。
+    1つでも FAIL があれば全体として FAIL と判定する。
+    issues は出現順序を維持しつつ重複排除する。
+    """
+    if not results:
+        return InspectionResult(passed=True, issues=[], suggested_prompt_fix="")
+
+    all_passed = all(r.passed for r in results)
+    merged_issues: List[str] = []
+    seen_issues = set()
+    for r in results:
+        for issue in r.issues:
+            if issue not in seen_issues:
+                seen_issues.add(issue)
+                merged_issues.append(issue)
+
+    fix_parts = [r.suggested_prompt_fix.strip() for r in results if r.suggested_prompt_fix.strip()]
+    merged_fix = "\n".join(fix_parts)
+    raw_responses = [r.raw_response for r in results if r.raw_response]
+    merged_raw = "\n---\n".join(raw_responses)
+
+    return InspectionResult(
+        passed=all_passed,
+        issues=merged_issues,
+        suggested_prompt_fix=merged_fix,
+        raw_response=merged_raw,
+    )
+
+
 VLM_INSPECTION_PROMPT = """
 あなたはHTML/PDFスライド資料の視覚品質検査官（Visual Quality Inspector）です。
 添付された各スライドのレンダリング画像（PNG）を詳細に目視検査し、以下の項目を厳密にチェックしてください。
@@ -232,28 +275,25 @@ VLM_INSPECTION_PROMPT = """
 
 # --- 4. Gemini & Azure Inspection Helpers ---
 
-def inspect_slides_with_gemini(
-    client, model_id: str, slide_images: List[dict]
+def _inspect_single_chunk_gemini(
+    client, model_id: str, chunk: List[dict]
 ) -> InspectionResult:
-    """Gemini のマルチモーダル機能を用いてスライド画像を視覚検査する。"""
-    if not slide_images:
-        return InspectionResult(
-            passed=True, issues=[], suggested_prompt_fix="No images to inspect."
-        )
+    """単一の画像チャンク（最大4枚）に対して Gemini VLM 検査を実行する。"""
+    if not chunk:
+        return InspectionResult(passed=True, issues=[], suggested_prompt_fix="")
 
     try:
         from google.genai import types
 
         contents = []
-        for s in slide_images:
+        for s in chunk:
             contents.append(f"### Slide {s['slide_number']}")
             contents.append(types.Part.from_bytes(data=s["bytes"], mime_type="image/png"))
 
         contents.append(VLM_INSPECTION_PROMPT)
 
         state_manager.add_debug_log(
-            f"[VisualInspector] Requesting Gemini visual inspection "
-            f"with {len(slide_images)} images."
+            f"[VisualInspector] Requesting Gemini visual inspection for chunk with {len(chunk)} images."
         )
         response = client.models.generate_content(
             model=model_id,
@@ -266,25 +306,65 @@ def inspect_slides_with_gemini(
         return parse_vlm_inspection_response(response.text)
     except Exception as e:
         state_manager.add_debug_log(
-            f"[VisualInspector] Gemini visual inspection error: {e}", "warning"
+            f"[VisualInspector] Gemini visual inspection chunk error: {e}", "warning"
         )
         return InspectionResult(
             passed=True, issues=[], suggested_prompt_fix="", raw_response=str(e)
         )
 
 
-def inspect_slides_with_azure(runtime, slide_images: List[dict]) -> InspectionResult:
-    """Azure OpenAI (GPT Vision) を用いてスライド画像を視覚検査する。"""
+def inspect_slides_with_gemini(
+    client, model_id: str, slide_images: List[dict]
+) -> InspectionResult:
+    """
+    Gemini のマルチモーダル機能を用いてスライド画像を視覚検査する。
+    画像が多数存在する場合は最大4枚ずつのバッチに分割し、並行（Concurrent）で監査を実行する。
+    """
     if not slide_images:
         return InspectionResult(
             passed=True, issues=[], suggested_prompt_fix="No images to inspect."
         )
 
+    chunks = chunk_slide_images(slide_images, chunk_size=4)
+    if len(chunks) == 1:
+        return _inspect_single_chunk_gemini(client, model_id, chunks[0])
+
+    state_manager.add_debug_log(
+        f"[VisualInspector] Executing parallel Gemini visual inspection across {len(chunks)} batches."
+    )
+    max_workers = min(3, len(chunks))
+    results: List[InspectionResult | None] = [None] * len(chunks)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_inspect_single_chunk_gemini, client, model_id, chunk): idx
+            for idx, chunk in enumerate(chunks)
+        }
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception as e:
+                state_manager.add_debug_log(
+                    f"[VisualInspector] Exception in Gemini batch {idx}: {e}", "warning"
+                )
+                results[idx] = InspectionResult(
+                    passed=True, issues=[], suggested_prompt_fix="", raw_response=str(e)
+                )
+
+    valid_results = [r for r in results if r is not None]
+    return merge_inspection_results(valid_results)
+
+
+def _inspect_single_chunk_azure(runtime, chunk: List[dict]) -> InspectionResult:
+    """単一の画像チャンク（最大4枚）に対して Azure OpenAI Vision 検査を実行する。"""
+    if not chunk:
+        return InspectionResult(passed=True, issues=[], suggested_prompt_fix="")
+
     try:
         from . import azure_responses_router
 
         content_items = []
-        for s in slide_images:
+        for s in chunk:
             b64_img = base64.b64encode(s["bytes"]).decode("ascii")
             data_url = f"data:image/png;base64,{b64_img}"
             content_items.append({"type": "input_text", "text": f"### Slide {s['slide_number']}"})
@@ -297,7 +377,7 @@ def inspect_slides_with_azure(runtime, slide_images: List[dict]) -> InspectionRe
         ]
 
         state_manager.add_debug_log(
-            f"[VisualInspector] Requesting Azure visual inspection with {len(slide_images)} images."
+            f"[VisualInspector] Requesting Azure visual inspection for chunk with {len(chunk)} images."
         )
         response = azure_responses_router.generate_response(
             runtime=runtime,
@@ -309,8 +389,48 @@ def inspect_slides_with_azure(runtime, slide_images: List[dict]) -> InspectionRe
         return parse_vlm_inspection_response(response.text)
     except Exception as e:
         state_manager.add_debug_log(
-            f"[VisualInspector] Azure visual inspection error: {e}", "warning"
+            f"[VisualInspector] Azure visual inspection chunk error: {e}", "warning"
         )
         return InspectionResult(
             passed=True, issues=[], suggested_prompt_fix="", raw_response=str(e)
         )
+
+
+def inspect_slides_with_azure(runtime, slide_images: List[dict]) -> InspectionResult:
+    """
+    Azure OpenAI (GPT Vision) を用いてスライド画像を視覚検査する。
+    画像が多数存在する場合は最大4枚ずつのバッチに分割し、並行（Concurrent）で監査を実行する。
+    """
+    if not slide_images:
+        return InspectionResult(
+            passed=True, issues=[], suggested_prompt_fix="No images to inspect."
+        )
+
+    chunks = chunk_slide_images(slide_images, chunk_size=4)
+    if len(chunks) == 1:
+        return _inspect_single_chunk_azure(runtime, chunks[0])
+
+    state_manager.add_debug_log(
+        f"[VisualInspector] Executing parallel Azure visual inspection across {len(chunks)} batches."
+    )
+    max_workers = min(3, len(chunks))
+    results: List[InspectionResult | None] = [None] * len(chunks)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_inspect_single_chunk_azure, runtime, chunk): idx
+            for idx, chunk in enumerate(chunks)
+        }
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception as e:
+                state_manager.add_debug_log(
+                    f"[VisualInspector] Exception in Azure batch {idx}: {e}", "warning"
+                )
+                results[idx] = InspectionResult(
+                    passed=True, issues=[], suggested_prompt_fix="", raw_response=str(e)
+                )
+
+    valid_results = [r for r in results if r is not None]
+    return merge_inspection_results(valid_results)

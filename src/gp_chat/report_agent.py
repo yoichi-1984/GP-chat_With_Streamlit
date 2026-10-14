@@ -1,3 +1,5 @@
+"""HTML/PDF レポート自動生成および視覚検査・自己修復エージェント。"""
+# pylint: disable=broad-exception-caught,line-too-long,too-many-locals,too-many-statements,too-many-arguments,too-many-positional-arguments,missing-function-docstring
 import os
 import re
 import subprocess
@@ -193,67 +195,96 @@ def run_report_generation(
 
     state_manager.add_debug_log(f"[Report Agent] Saved HTML: {html_path}")
 
-    # --- マルチモーダルVLMによる視覚的目視検査（文字化け・はみ出しチェック） ---
-    thought_status.update(
-        label="スライドの見た目（文字化け・レイアウト）を目視検査中...",
-        state="running",
-        expanded=False,
-    )
-    temp_inspect_dir = os.path.join(report_dir, f"{base_name}_inspect")
-    slide_images = report_visual_inspector.capture_slides_as_images(
-        html_path, temp_inspect_dir, max_slides=6
-    )
-    if slide_images:
+    # --- マルチモーダルVLMによる視覚的目視検査＆自己修復ループ（初回＋最大3回再作成） ---
+    max_retries = 3
+    retry_count = 0
+
+    while retry_count <= max_retries:
+        thought_status.update(
+            label="スライドの見た目（文字化け・レイアウト）を目視検査中..." if retry_count == 0
+                  else f"再生成スライドの見た目を目視検査中 (試行 {retry_count}/{max_retries})...",
+            state="running",
+            expanded=False,
+        )
+        temp_inspect_dir = os.path.join(report_dir, f"{base_name}_inspect_{retry_count}")
+        slide_images = report_visual_inspector.capture_slides_as_images(
+            html_path, temp_inspect_dir, max_slides=12
+        )
+        if not slide_images:
+            state_manager.add_debug_log("[Report Agent] No slide images captured. Skipping inspection.")
+            break
+
         inspection = report_visual_inspector.inspect_slides_with_gemini(
             client=client,
             model_id=model_id,
             slide_images=slide_images,
         )
-        if not inspection.passed:
+
+        if inspection.passed:
             state_manager.add_debug_log(
-                f"[Report Agent] Visual inspection failed: {inspection.issues}", "warning"
+                f"[Report Agent] Visual inspection passed (retry_count={retry_count})."
             )
-            thought_status.update(
-                label="視覚検査で不備を検出。レイアウトを自動調整して再生成中...",
-                state="running",
-                expanded=True,
+            break
+
+        state_manager.add_debug_log(
+            f"[Report Agent] Visual inspection failed (retry_count={retry_count}): {inspection.issues}",
+            "warning",
+        )
+
+        if retry_count == max_retries:
+            state_manager.add_debug_log(
+                f"[Report Agent] Reached maximum retry count ({max_retries}). Proceeding with current HTML.",
+                "warning",
             )
-            fix_adv = (
-                f"改善アドバイス: {inspection.suggested_prompt_fix}\n"
-                if inspection.suggested_prompt_fix else ""
+            break
+
+        retry_count += 1
+        thought_status.update(
+            label=f"視覚検査で不備を検出。レイアウトを自動調整して再生成中 (試行 {retry_count}/{max_retries})...",
+            state="running",
+            expanded=True,
+        )
+        fix_adv = (
+            f"改善アドバイス: {inspection.suggested_prompt_fix}\n"
+            if inspection.suggested_prompt_fix else ""
+        )
+        retry_instruction = (
+            f"{report_instruction}\n\n"
+            "# 視覚品質検査官からの修正指示（最優先で遵守してください）\n"
+            "前回のスライド画像検査において、以下の問題が視覚的に確認されました。"
+            "これらを確実に解決するようにHTMLコードを修正・再構成してください：\n"
+            + "\n".join(f"- {issue}" for issue in inspection.issues) + "\n"
+            + fix_adv
+        )
+        retry_contents = list(chat_contents)
+        retry_contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=retry_instruction)],
             )
-            retry_instruction = (
-                f"{report_instruction}\n\n"
-                "# 視覚品質検査官からの修正指示（最優先で遵守してください）\n"
-                "前回のスライド画像検査において、以下の問題が視覚的に確認されました。"
-                "これらを確実に解決するようにHTMLコードを修正・再構成してください：\n"
-                + "\n".join(f"- {issue}" for issue in inspection.issues) + "\n"
-                + fix_adv
+        )
+        retry_response = llm_router.generate_content_with_route(
+            llm_clients=llm_clients,
+            model_id=model_id,
+            contents=retry_contents,
+            config=gen_config,
+            mode="report",
+            logger=state_manager.add_debug_log,
+        )
+        retry_html = _extract_html_document(retry_response.text)
+        if "<html" in retry_html.lower():
+            html_document = report_visual_inspector.inject_twemoji_and_fonts(retry_html)
+            with open(html_path, "w", encoding="utf-8") as html_file:
+                html_file.write(html_document)
+            state_manager.add_debug_log(
+                f"[Report Agent] Saved retry HTML ({retry_count}/{max_retries}): {html_path}"
             )
-            retry_contents = list(chat_contents)
-            retry_contents.append(
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=retry_instruction)],
-                )
-            )
-            retry_response = llm_router.generate_content_with_route(
-                llm_clients=llm_clients,
-                model_id=model_id,
-                contents=retry_contents,
-                config=gen_config,
-                mode="report",
-                logger=state_manager.add_debug_log,
-            )
-            retry_html = _extract_html_document(retry_response.text)
-            if "<html" in retry_html.lower():
-                html_document = report_visual_inspector.inject_twemoji_and_fonts(retry_html)
-                with open(html_path, "w", encoding="utf-8") as html_file:
-                    html_file.write(html_document)
-                state_manager.add_debug_log(f"[Report Agent] Saved retry HTML: {html_path}")
-                response = retry_response
+            response = retry_response
         else:
-            state_manager.add_debug_log("[Report Agent] Visual inspection passed.")
+            state_manager.add_debug_log(
+                f"[Report Agent] Retry {retry_count} did not return complete HTML. Keeping previous version.",
+                "warning",
+            )
 
     thought_status.update(label="PDF スライドをレンダリング中...", state="running", expanded=False)
     pdf_success, pdf_error = _render_html_to_pdf(html_path, pdf_path)

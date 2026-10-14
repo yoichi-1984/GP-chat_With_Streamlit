@@ -217,19 +217,21 @@ gp-chat/
 #### ⑬ `src/gp_chat/report_agent.py`
 - **責務**: 会話履歴からのプレゼンテーション用 HTML スライド生成、Twemoji/フォント自動注入、マルチモーダルVLM視覚検査（文字化け・はみ出し自動検知＆リトライ）、および Headless ブラウザによる PDF 自動エクスポート。
 - **主要関数**:
-  - `run_report_generation(...) -> tuple[str, object | None, dict]`: 会話履歴から A4横向きカードUI HTML を生成し、Twemoji/絵文字フォントCSSを自動注入。Playwrightでスライド画像をキャプチャし、Gemini VLMによる視覚品質検査を実施（不備時は1回自動リトライ）。最終的に `slide_data/<フォルダ>/<連番>.html` および `.pdf` に保存。
+  - `run_report_generation(...) -> tuple[str, object | None, dict]`: 会話履歴から A4横向きカードUI HTML を生成し、Twemoji/絵文字フォントCSSを自動注入。Playwrightでスライド画像（最大12枚）をキャプチャし、Gemini VLMによる視覚品質検査を実施（不備時は最大3回自動再作成、PASS時は即座に早期終了）。最終的に `slide_data/<フォルダ>/<連番>.html` および `.pdf` に保存。
   - `_find_pdf_browser() -> str | None`: Edge / Chrome の実行ファイルパスを自動探索。
   - `_render_html_to_pdf(html_path: str, pdf_path: str) -> tuple[bool, str | None]`: Headless ブラウザを `subprocess.run` で起動し、`--print-to-pdf` で PDF を保存。
 
 #### ⑬-B `src/gp_chat/report_visual_inspector.py`
-- **責務**: PDFレポートにおける絵文字文字化け防止のための Twemoji / CSS自動注入、Playwright によるスライド要素の高解像度画像キャプチャ、およびマルチモーダルVLM（Gemini / Azure Vision）を用いた「視覚的」目視品質検査。
+- **責務**: PDFレポートにおける絵文字文字化け防止のための Twemoji / CSS自動注入、Playwright によるスライド要素の高解像度画像キャプチャ（最大12枚）、およびマルチモーダルVLM（Gemini / Azure Vision）を用いた4枚分割並行・目視品質検査。
 - **主要関数・クラス**:
   - `class InspectionResult`: 視覚検査結果（`passed: bool`, `issues: List[str]`, `suggested_prompt_fix: str`, `raw_response: str`）。
   - `inject_twemoji_and_fonts(html_content: str) -> str`: Twemoji CDN スクリプト（SVG絵文字化）および `'Segoe UI Emoji'` 等の二重防護フォールバックCSSを HTML の `<head>` に自動注入。重複注入を防止。
-  - `capture_slides_as_images(html_path: str, temp_dir: str, max_slides: int = 6) -> List[dict]`: Playwright（Chromium / Edge / Chrome）を使用してHTMLスライドをレンダリングし、各 `.slide` 要素のPNG画像を保存・取得。
+  - `capture_slides_as_images(html_path: str, temp_dir: str, max_slides: int = 12) -> List[dict]`: Playwright（Chromium / Edge / Chrome）を使用してHTMLスライドをレンダリングし、各 `.slide` 要素のPNG画像を保存・取得（最大12枚）。
+  - `chunk_slide_images(slide_images: List[dict], chunk_size: int = 4) -> List[List[dict]]`: スライド画像リストを最大4枚ずつのチャンクに分割。
+  - `merge_inspection_results(results: List[InspectionResult]) -> InspectionResult`: 複数バッチの検査結果をマージ・集約（1つでもFAILなら全体FAIL、issues重複排除、suggested_prompt_fix統合）。
   - `parse_vlm_inspection_response(raw_text: str) -> InspectionResult`: VLMの検査結果（JSON）を安全にパース。
-  - `inspect_slides_with_gemini(client, model_id: str, slide_images: List[dict]) -> InspectionResult`: Gemini のマルチモーダル機能（画像パーツ渡し）を用いて、文字化け（☒）や枠外はみ出し、レイアウト崩れを目視検査。
-  - `inspect_slides_with_azure(runtime, slide_images: List[dict]) -> InspectionResult`: Azure OpenAI (GPT Vision) の `input_image` 機能を用いて、同様にスライド画像を目視検査。
+  - `inspect_slides_with_gemini(client, model_id: str, slide_images: List[dict]) -> InspectionResult`: Gemini のマルチモーダル機能を用い、4枚分割バッチを `ThreadPoolExecutor` で並行監査し、マージした結果を返却。
+  - `inspect_slides_with_azure(runtime, slide_images: List[dict]) -> InspectionResult`: Azure OpenAI (GPT Vision) の `input_image` 機能を用い、同様に4枚分割バッチを `ThreadPoolExecutor` で並行監査し、マージした結果を返却。
 
 #### ⑭ `src/gp_chat/pptx_agent.py`
 - **責務**: PowerPoint ネイティブプレゼンテーション自動生成、Playwright幾何学バリデーション、AI画像自動生成/トリミング、Marp設計思想の適用、4層パイプラインの実行。
@@ -1095,6 +1097,13 @@ graph LR
     * プロンプトに厳密な JSON スキーマ例示（テンプレートレイアウト候補・推奨レイアウトを含む）を注入し、生成精度と適合性を向上。
     * `main.py` の `_resolve_mode_name` および `_run_azure_mode` に `report_pptx` モードディスパッチを追加し、UI へのダウンロードボタン連携を実装。
     * `pptx_agent.py` の物理スライド描画処理を `save_physical_presentation` としてモジュールレベル関数化し、Gemini / Azure 間で共通利用できるようにリファクタリング。関数配置を `class PPTXAgent` の直前へ是正し、Gemini 側の `PPTXAgent.generate_presentation_pipeline` クラスメソッド整合性を完全に担保。
+* **2026-10-14**
+  * PDFレポート生成におけるVLM視覚監査ループ拡張（最大3回再作成）とスライド12枚対応（4枚分割並行監査）の導入:
+    * `report_visual_inspector.py` において、`capture_slides_as_images` の最大キャプチャ枚数を 6 枚から 12 枚へ拡大。
+    * スライド画像を最大 4 枚単位に分割する `chunk_slide_images`、および複数バッチの監査結果を統合・重複排除する `merge_inspection_results` を実装。
+    * `inspect_slides_with_gemini` および `inspect_slides_with_azure` において、`ThreadPoolExecutor(max_workers=3)` による並行 VLM 監査を導入し、タイムアウトや推論負荷を抑えつつ高速・高精度な全数検査を実現。
+    * `report_agent.py` (Gemini) および `azure_report_agent.py` (Azure) において、従来の単発リトライから初回＋最大3回再作成（計最大4回検査）の `while` ループ構造へ刷新。PASS時の即時終了（Early Exit）と試行回数 UI 表示（`thought_status`）を統合。
+    * 単体テスト（`tests/test_report_visual_inspector.py`, `tests/test_report_retry_loop.py`）を整備し、全51件の単体テスト通過と Pylint 10.00/10 を確認。
 * **2026-10-14**
   * 新モデル `gemini-4-argon` 対応および Thinking Level 選択・自動モデル決定仕様の刷新:
     * システムデフォルトモデルを `gemini-4-argon`、デフォルト思考レベル（`reasoning_effort`）を `medium` に更新。
