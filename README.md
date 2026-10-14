@@ -10,7 +10,7 @@
 
 ## 📖 はじめに (Introduction)
 
-`GP-Chat` は、Google Cloud Platform (Vertex AI) の **Gemini モデル群 (最新フラッグシップ Gemini 3.8 Flash 含む)** および **Azure OpenAI サービス (GPT-5.6 / GPT-6 含む)** を高度に統合・最適化した、エンタープライズ対応の Streamlit ベース次世代 AI ワークステーションです。
+`GP-Chat` は、Google Cloud Platform (Vertex AI) の **Gemini モデル群 (最新フラッグシップ gemini-4-argon 含む)** および **Azure OpenAI サービス (GPT-5.6 / GPT-6 含む)** を高度に統合・最適化した、エンタープライズ対応の Streamlit ベース次世代 AI ワークステーションです。
 
 本ドキュメントは、本アプリケーションの**システム仕様書兼開発・運用マニュアル**です。システムの全体アーキテクチャ、ファイル構造、UI/UX 挙動、特化型自律エージェントの内部アルゴリズム、二重化ルーティングと障害耐性、コンテキスト管理、および全セッション状態変数に至るまで、主要な設計情報を網羅しています。
 
@@ -39,7 +39,7 @@ GP-Chat は、一般的な対話型チャットの枠を超え、データ分析
 
 ### 🌟 コア機能ハイライト
 - **ハイブリッド LLM 冗長化構成**:
-  - 主系: **GCP Vertex AI (`gemini-3.8-flash` 等)** を Standard / Priority クライアントの二重化制御で利用。
+  - 主系: **GCP Vertex AI (`gemini-4-argon` 等)** を Standard / Priority クライアントの二重化制御で利用。
   - 副系: API レートリミット（429）や障害検知時に **Azure OpenAI** へ自動フォールバック。
   - 特化モデル: `gpt-5.3-codex` / `gpt-5.6` / `gpt-6` 選択時は GCP をバイパスし Azure へ直接接続。
 - **GPT-5.6 / GPT-6 専用 HTTPX2並行ハイブリッドオーケストレーター**:
@@ -168,7 +168,7 @@ gp-chat/
 | :--- | :--- | :--- |
 | `main_runner.py` | `run()` | CLIコマンド `gp-chat` のエントリポイント。`sys.argv` を構築して `streamlit.web.cli.main()` を呼出。 |
 | `main.py` | `main()` | UI全体の描画制御、セッション初期化、チャット入力受付、ストリーミング出力、思考ログ永続化、モデル別バイパス・Azure Fallback制御。 |
-| `sidebar.py` | `render_sidebar()` | サイドバー描画、`.env` 切替、モデル選択（9モデル）、Thinking Level、排他トグル制御、Canvas（st_ace）描画、履歴ロード/リセット。 |
+| `sidebar.py` | `render_sidebar()` | サイドバー描画、`.env` 切替、モデル選択（3モデル）、Thinking Level、排他トグル制御、Canvas（st_ace）描画、履歴ロード/リセット。 |
 | `config.py` | `UITexts`, `SESSION_STATE_DEFAULTS` | システム定数（最大Canvas数=40、タイムアウト=30秒、リトライ間隔）、UI文言、選択可能モデル一覧、初期状態定義。 |
 | `utils.py` | `parse_file()`, `build_materialized_chat_context()` | Word/Excel/PPT/PDF/画像のマルチモーダルパース、MIME判定、プロンプト読込、Gemini用Partリスト構築。 |
 | `state_manager.py` | `save_chat_history()`, `cleanup_session_on_load()` | 会話履歴のJSON保存/読込、会話分岐（`✂️`）、中断検知・ドラフト復元、不要な一時ウィジェットキー削除。 |
@@ -206,7 +206,7 @@ gp-chat/
 # pyproject.toml より抜粋 (全22パッケージ固定)
 dependencies = [
     "streamlit==1.52.2",              # WebUIフレームワーク
-    "google-genai==2.22.0",            # Google GenAI 統一 SDK (Gemini 3.8 Flash 公式対応)
+    "google-genai==2.22.0",            # Google GenAI 統一 SDK (Gemini 4 / 3 世代公式対応)
     "google-auth==2.57.1",             # GCP 認証ライブラリ
     "google-cloud-logging==3.15.0",    # GCP Cloud Logging 監査ログ送信用
     "python-dotenv==1.2.1",            # .env 環境変数ローダー
@@ -286,7 +286,7 @@ cp sample_of.env env/default.env
 | **`GCP_PROJECT_ID`** | **必須** | - | `your-gcp-project-id` | Google Cloud プロジェクト ID。 |
 | **`GCP_LOCATION`** | **必須** | `global` | `global`, `us-central1`, `asia-northeast1` | Vertex AI の Gemini が稼働するリージョン。 |
 | **`GOOGLE_APPLICATION_CREDENTIALS`** | **必須** (ローカル時) | - | `C:/keys/service-account.json` | GCP サービスアカウントキー (JSON) の絶対パス。 |
-| **`GEMINI_MODEL_ID`** | 任意 | `gemini-3.8-flash` | `gemini-3.8-flash`, `gemini-3.7-flash` | UI 起動時のデフォルトモデル ID。 |
+| **`GEMINI_MODEL_ID`** | 任意 | `gemini-4-argon` | `gemini-4-argon`, `gemini-3.8-flash` | UI 起動時のデフォルトモデル ID。 |
 | **`MAX_TOKEN`** | 任意 | `65536` | `65536`, `8192` | LLM が生成する最大出力トークン数。 |
 | **`AZURE_OPENAI_ENDPOINT`** | 任意 (Azure利用時) | - | `https://xxxx.openai.azure.com/` | Azure OpenAI サービスのエンドポイント URL。 |
 | **`AZURE_OPENAI_API_KEY`** | 任意 (Azure利用時) | - | `32桁の16進数キー` | Azure OpenAI API キー。 |
@@ -376,8 +376,8 @@ streamlit run src/gp_chat/main.py
 | 設定項目 | 選択値 / 機能概要 | 連動・ロック仕様マトリクス |
 | :--- | :--- | :--- |
 | **Environment** | `.env` ファイルの動的切替 | 生成中 (`is_generating=True`) は無効化。 |
-| **Target Model** | モデル選択（`gemini-3.8-flash`, `gpt-6` 等9モデル） | `gpt-5.3-codex` / `gpt-5.6` / `gpt-6` 選択時は最初から Azure OpenAI に直接接続（GCPバイパス）。 |
-| **Thinking Level** | `high` / `medium` / `low` / `deep` (推論レベル) | 「徹底調査」または「レポート機能 (pdf/pptx)」が ON の時は **強制的に `high` に固定され UI がロック**。生成中は無効化。 |
+| **Target Model** | モデル選択（`gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.5-flash-lite` の3択） | デフォルトは `gemini-4-argon`。Thinking Level と連携して高品質・高速な推論を提供。 |
+| **Thinking Level** | `high` / `medium` / `low` / `deep` (推論レベル) | デフォルトは `medium`。`low`・`medium`・`high` を正確に API へ伝送。「deep」選択時は自動で `gemini-4-argon` の `high` で実行。「徹底調査」または「レポート機能 (pdf/pptx)」が ON の時は **強制的に `high` に固定され UI がロック**。生成中は無効化。 |
 | **Web検索** | Google Search Grounding の ON/OFF | 「徹底調査」が ON の時は **強制的に ON に固定され UI がロック**。生成中は無効化。 |
 | **徹底調査** | `More Research` 自律反復検索 | 「Thinking Level: deep」または「レポート機能 (pdf/pptx)」が ON の時は **選択不可（UI ロック）**。生成中は無効化。 |
 | **レポート機能（pdf）** | HTML/PDFスライド自動生成 | 「徹底調査」「Thinking Level: deep」「レポート機能(pptx)」のいずれかが ON の時は **選択不可（UI ロック）**。ON 時は Thinking Level が `high` に固定。 |
@@ -619,8 +619,8 @@ Marp の設計思想を取り入れた、PowerPoint ファイル（`.pptx`）の
 | :--- | :---: | :--- | :--- |
 | `messages` | `list[dict]` | `[]` | 会話履歴の辞書リスト（ロール、コンテンツ、Grounding情報、トークン情報、`thought_log` 永続化等）。 |
 | `system_role_defined` | `bool` | `False` | システムプロンプトが確定してチャット画面に移行したかどうかのフラグ。 |
-| `current_model_id` | `str` | `gemini-3.8-flash` | 現在選択されているターゲットモデル ID。 |
-| `reasoning_effort` | `str` | `high` | 現在の Thinking Level (`high`, `medium`, `low`, `deep`)。 |
+| `current_model_id` | `str` | `gemini-4-argon` | 現在選択されているターゲットモデル ID。 |
+| `reasoning_effort` | `str` | `medium` | 現在の Thinking Level (`high`, `medium`, `low`, `deep`)。 |
 | `enable_google_search` | `bool` | `True` | Google Search Grounding の有効化フラグ。 |
 | `enable_more_research` | `bool` | `False` | 徹底調査モード（More Research）の有効化フラグ。 |
 | `report_mode_pdf` | `bool` | `False` | レポート機能（PDF）の有効化フラグ。 |
