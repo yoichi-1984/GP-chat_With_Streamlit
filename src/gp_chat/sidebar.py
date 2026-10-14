@@ -26,7 +26,7 @@ class VirtualUploadedFile:
         return self._data
 
 def render_sidebar(supported_types, env_files, load_history, load_local_history, handle_clear, handle_review, handle_validation, handle_file_upload):
-    """Renders the sidebar with Gemini 3 specific options and model selector."""
+    """Renders the sidebar with Gemini specific options and model selector."""
     
     # トグルUIが操作されたときに裏のステータスを更新するコールバック
     def _toggle_cb(idx, k):
@@ -585,7 +585,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.7.5</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.8.0</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>
