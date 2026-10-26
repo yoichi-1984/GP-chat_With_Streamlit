@@ -12,7 +12,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit==1.52.2",
+    "streamlit>=1.54.0",
     "google-genai==2.22.0",
     "google-auth==2.57.1",
     "google-cloud-logging==3.15.0",
@@ -22,7 +22,7 @@ dependencies = [
     "PyYAML==6.0.3",
     "python-docx==1.2.0",
     "pywin32==311; sys_platform == 'win32'",
-    "pillow==11.1.0",
+    "pillow>=13.0.0",
     "pandas==2.3.3",
     "matplotlib==3.10.8",
     "openai==3.8.0",
@@ -33,7 +33,13 @@ dependencies = [
     "python-calamine==0.6.2",
     "tabulate==0.10.0",
     "python-pptx==1.0.2",
-    "playwright==1.61.0"
+    "playwright==1.61.0",
+    "requests>=2.33.0",
+    "urllib3>=2.8.0",
+    "GitPython>=3.1.51",
+    "certifi>=2026.10.19",
+    "grpcio>=1.83.0",
+    "brotli>=1.2.1"
 ]
 
 [project.scripts]

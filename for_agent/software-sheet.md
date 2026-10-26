@@ -60,6 +60,7 @@ gp-chat/
 ├── LICENSE                     # Apache 2.0 ライセンス
 ├── START.bat                   # ワンクリック起動バッチ (Windows)
 ├── install.bat                 # 仮想環境セットアップ・依存更新バッチ
+├── update_certs.bat            # 証明書・セキュリティパッケージ更新用バッチ (git cloneユーザー向け)
 ├── sample_of.env               # 環境変数設定サンプル
 ├── for_agent/
 │   └── software-sheet.md       # 本システム設計仕様書
@@ -1035,6 +1036,11 @@ graph LR
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-10-26**
+  * 包括的セキュリティ脆弱性対策（Streamlit NTLM漏洩 / Pillow RCE / urllib3 DoS / GitPython コマンドインジェクション / requests 一時ファイル / eMudhra証明書危殆化 / gRPC独自証明書 / Brotliデコーダー）への対応:
+    * `requirements.txt` および `pyproject.toml` に `streamlit>=1.54.0`, `pillow>=13.0.0`, `urllib3>=2.8.0`, `GitPython>=3.1.51`, `requests>=2.33.0`, `certifi>=2026.10.19`, `grpcio>=1.83.0`, `brotli>=1.2.1` を適用。コードベースとのAPI互換性（Image.open / crop / size, Streamlit基本UI等）を検証。
+    * `install.bat` に `requirements.txt` の自動インストール・更新ステップを追加。
+    * GitHubクローン環境利用者向けの証明書・セキュリティパッケージ更新用ワンクリックバッチ `update_certs.bat` を新設・安全なASCII構文に整備。
 * **2026-09-28**
   * 依存パッケージ定義における `httpx2[http2]` 明示指定への適正化:
     * 課題: HTTP/2 通信エンジンである `httpx2` において、HTTP/2 機能はオプショナル依存関係（`Provides-Extra: http2`）として提供されており、`pyproject.toml` および `requirements.txt` の `httpx2==2.12.0` 単体記述では依存意図が不明瞭であった。
