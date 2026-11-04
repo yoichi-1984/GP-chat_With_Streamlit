@@ -137,6 +137,12 @@ gp-chat/
   - `_render_thinking_level_selector(is_locked: bool) -> None`: `high` / `medium` / `low` / `deep` の推論レベル選択セレクトボックスを描画。
   - `_render_canvas_section(data_manager_instance) -> None`: 最大40スロットの Ace Editor、トグルボタン、Pylint検証ボタン、レビューボタンを描画。
   - `_render_history_section() -> None`: 過去の `chat_log/*.json` 一覧からの選択ロード、JSONファイルアップロード、および会話リセットボタンを描画。
+- **Canvas 送信トグルの制御仕様（2026-11-03 改訂）**:
+  - 自動 ON は「有効なコード（空文字・`ACE_EDITOR_DEFAULT_CODE` 以外）への意味のある変更」があった場合のみ発火する。旧コードの全消去（空文字化）では自動 ON / `toggle_keys` 更新を行わない。
+  - トグルの widget key は `cvs_tog_{canvas_key_counter}_{i}_{toggle_keys[i]}`（シングル: `cvs_tog_s_{canvas_key_counter}_{toggle_keys[0]}`）。リセット・履歴読込・クリア・ファイル読込で `canvas_key_counter` が進むと新しいキー空間に切り替わり、旧トグル state と衝突しない。
+  - 会話リセット（`handle_full_reset`）でも `ace_*` / `up_*` / `cvs_tog_*` の widget state を破棄する。
+  - Canvas「クリア」ボタン押下時は、`always_send_all_canvases` が OFF なら該当 Canvas の `canvas_enabled` を False にし、`_canvas_reset_pending = True` で旧値の巻き戻りを防ぐ。
+  - 「会話履歴を保存 (JSON)」ボタンは、表示位置を `st.empty()` で確保したうえで、Canvas(`st_ace`) の値を `python_canvases` に反映した後（サイドバー末尾）に描画する。これにより編集直後でも最新の Canvas が JSON に含まれる。
 
 #### ④ `src/gp_chat/config.py`
 - **責務**: アプリケーション全体の定数定義、デフォルトセッションステート、UI文言定義、オーケストレーター設定。
@@ -1036,6 +1042,13 @@ graph LR
 
 ## 第13章: 改訂履歴 (Revision History)
 
+* **2026-11-03**
+  * Canvas 送信の間欠不具合（Canvas が AI に送られない／トグル ON が効かず ON/OFF を繰り返すと直る）の修正（`src/gp_chat/sidebar.py` のみ・副作用最小化方針）:
+    * 旧コード全消去（空文字化）で自動 ON と `toggle_keys` 更新が発火し、続く貼り付け・手動トグル操作と衝突していた問題を解消（有効コードへの変更時のみ自動 ON）。
+    * トグル widget key に `canvas_key_counter` を含め、リセット／履歴読込／クリア後の旧キー（`cvs_tog_0_0` 等）との衝突を解消。`handle_full_reset` に `cvs_tog_*` の破棄を追加。
+    * Canvas クリア時に `canvas_enabled` を OFF（全送信モード時を除く）にし、`_canvas_reset_pending` で巻き戻りを防止。
+    * 履歴 JSON ダウンロードボタンを Canvas 反映後に描画し、1 ターン古い Canvas が出力される問題を解消（表示位置は不変）。
+    * `auto_update=not is_generating`、生成中 UI ロック、`toggle_keys` 方式、`main.py` / `state_manager.py` / 送信コンテキスト構築処理は変更なし。
 * **2026-10-26**
   * 包括的セキュリティ脆弱性対策（Streamlit NTLM漏洩 / Pillow RCE / urllib3 DoS / GitPython コマンドインジェクション / requests 一時ファイル / eMudhra証明書危殆化 / gRPC独自証明書 / Brotliデコーダー）への対応:
     * `requirements.txt` および `pyproject.toml` に `streamlit>=1.54.0`, `pillow>=13.0.0`, `urllib3>=2.8.0`, `GitPython>=3.1.51`, `requests>=2.33.0`, `certifi>=2026.10.19`, `grpcio>=1.83.0`, `brotli>=1.2.1` を適用。コードベースとのAPI互換性（Image.open / crop / size, Streamlit基本UI等）を検証。

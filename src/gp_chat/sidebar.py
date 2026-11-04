@@ -238,7 +238,7 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
             # Canvas 系 widget の旧 state を次 run へ持ち越さない
             for key in list(st.session_state.keys()):
-                if key.startswith("ace_") or key.startswith("up_"):
+                if key.startswith("ace_") or key.startswith("up_") or key.startswith("cvs_tog_"):
                     del st.session_state[key]
 
         st.header(config.UITexts.SIDEBAR_HEADER)
@@ -313,7 +313,14 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         st.caption("📤 JSONファイルから再開")
         
-        if st.session_state.get('messages'):
+        # JSONダウンロードボタンは描画位置だけをここで確保し、実際の描画は
+        # Canvas(st_ace) の値が python_canvases へ反映された後（サイドバー末尾）で行う。
+        # これにより、Canvas 編集直後でも 1 つ前の Canvas 状態が出力されない。
+        history_download_placeholder = st.empty()
+
+        def _render_history_download_button():
+            if not st.session_state.get('messages'):
+                return
             history_data = {
                 "messages": st.session_state['messages'],
                 "python_canvases": st.session_state['python_canvases'],
@@ -443,7 +450,14 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
 
         def _local_handle_clear(idx):
             handle_clear(idx)
+            # クリア後の空 Canvas がトグル ON のまま残らないようにする（全送信モード時は維持）
+            if not st.session_state.get('always_send_all_canvases', False):
+                enabled = st.session_state.get('canvas_enabled')
+                if enabled is not None and idx < len(enabled):
+                    enabled[idx] = False
             st.session_state['canvas_key_counter'] += 1
+            # クリア直後の 1 run は、component 側の旧値で巻き戻されないようにする
+            st.session_state['_canvas_reset_pending'] = True
 
         canvases = st.session_state['python_canvases']
         reset_pending = st.session_state.get('_canvas_reset_pending', False)
@@ -486,18 +500,25 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
                 if reset_pending:
                     updated = content
                 if updated != content:
-                    is_meaningful_change = updated.strip() != content.strip()
+                    # 空文字・デフォルト文字列への変化（旧コードの全消去など）は自動 ON の対象外
+                    has_valid_code = (
+                        bool(updated.strip())
+                        and updated.strip() != config.ACE_EDITOR_DEFAULT_CODE.strip()
+                    )
+                    is_meaningful_change = (updated.strip() != content.strip()) and has_valid_code
                     canvases[i] = updated
                     if is_meaningful_change and not st.session_state['canvas_enabled'][i]:
                         st.session_state['canvas_enabled'][i] = True
 
                 # 裏のステータスとUIの乖離を補正
+                # canvas_key_counter を含め、リセット/履歴読込/クリア後の旧トグルとキー衝突させない
+                cvs_ck = st.session_state['canvas_key_counter']
                 tk = st.session_state['toggle_keys'][i]
-                expected_key = f"cvs_tog_{i}_{tk}"
+                expected_key = f"cvs_tog_{cvs_ck}_{i}_{tk}"
                 
                 if expected_key in st.session_state and st.session_state[expected_key] != st.session_state['canvas_enabled'][i]:
                     st.session_state['toggle_keys'][i] += 1
-                    expected_key = f"cvs_tog_{i}_{st.session_state['toggle_keys'][i]}"
+                    expected_key = f"cvs_tog_{cvs_ck}_{i}_{st.session_state['toggle_keys'][i]}"
 
                 with toggle_placeholder:
                     st.toggle(
@@ -547,17 +568,24 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
             if reset_pending:
                 updated = canvases[0]
             if updated != canvases[0]:
-                is_meaningful_change = updated.strip() != canvases[0].strip()
+                # 空文字・デフォルト文字列への変化（旧コードの全消去など）は自動 ON の対象外
+                has_valid_code = (
+                    bool(updated.strip())
+                    and updated.strip() != config.ACE_EDITOR_DEFAULT_CODE.strip()
+                )
+                is_meaningful_change = (updated.strip() != canvases[0].strip()) and has_valid_code
                 canvases[0] = updated
                 if is_meaningful_change and not st.session_state['canvas_enabled'][0]:
                     st.session_state['canvas_enabled'][0] = True
 
+            # canvas_key_counter を含め、リセット/履歴読込/クリア後の旧トグルとキー衝突させない
+            cvs_ck = st.session_state['canvas_key_counter']
             tk = st.session_state['toggle_keys'][0]
-            expected_key = f"cvs_tog_s_{tk}"
+            expected_key = f"cvs_tog_s_{cvs_ck}_{tk}"
             
             if expected_key in st.session_state and st.session_state[expected_key] != st.session_state['canvas_enabled'][0]:
                 st.session_state['toggle_keys'][0] += 1
-                expected_key = f"cvs_tog_s_{st.session_state['toggle_keys'][0]}"
+                expected_key = f"cvs_tog_s_{cvs_ck}_{st.session_state['toggle_keys'][0]}"
 
             with toggle_placeholder:
                 st.toggle(
@@ -581,11 +609,15 @@ def render_sidebar(supported_types, env_files, load_history, load_local_history,
         if reset_pending:
             st.session_state['_canvas_reset_pending'] = False
 
+        # Canvas の最新値が python_canvases に反映された後で JSON ダウンロードボタンを描画する
+        with history_download_placeholder:
+            _render_history_download_button()
+
         st.markdown("---")
         st.markdown(
             """
             <div style="text-align: center; font-size: 12px; color: #666;">
-                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.8.0</a><br>
+                Powered by <a href="https://github.com/yoichi-1984/GP-chat_With_Streamlit" target="_blank" style="color: #666;">GP-Chat Ver.0.8.3</a><br>
                 © yoichi-1984<br>
                 Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" style="color: #666;">Apache 2.0</a>
             </div>
